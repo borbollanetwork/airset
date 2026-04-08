@@ -1,0 +1,873 @@
+#!/bin/bash
+# =============================================================================
+# airmon — Wireless Monitor Mode Manager
+# Adaptado para Parrot OS 7 (Debian Bookworm / kernel 6.x)
+#
+# Baseado no airmon-ng original do projeto Aircrack-ng
+# Melhorias: 'ip' em vez de 'ifconfig', 'iw' como método primário,
+#             bash em vez de sh, detecção moderna de interfaces,
+#             suporte a phy80211 aprimorado, tratamento de erros robusto.
+# =============================================================================
+
+# Garante bash (não sh)
+[ -z "$BASH_VERSION" ] && exec bash "$0" "$@"
+
+set -o errexit   # sai em erro
+set -o nounset   # variável não definida é erro
+set -o pipefail  # falha em pipe propaga erro
+
+# --- Variáveis globais -------------------------------------------------------
+USERID=""
+IFACE=""
+CH="${3:-10}"
+IFACE_FOUND="false"
+MADWIFI=0
+MAC80211=0
+USE_IW=0
+IW_ERROR=""
+UDEV_ISSUE=0
+DRIVER=""
+BUS=""
+MODULE=""
+CHIPSET=""
+PHYDEV=""
+MONDEV=""
+
+MON_PREFIX="${MON_PREFIX:-mon}"
+
+# Parrot OS 7 usa 'ip' — ifconfig disponível via net-tools mas obsoleto
+# Detecta qual binário de gerenciamento de rede usar
+IP_CMD="ip"
+IFCONFIG_CMD=""
+if command -v ifconfig >/dev/null 2>&1; then
+    IFCONFIG_CMD="ifconfig"
+fi
+
+# iw é o método moderno (nl80211) — obrigatório no kernel 6.x
+if command -v iw >/dev/null 2>&1; then
+    USE_IW=1
+else
+    echo "AVISO: 'iw' não encontrado. Instale: apt install iw" >&2
+    USE_IW=0
+fi
+
+# Processos que podem interferir no modo monitor
+PROCESSES="wpa_action\|wpa_supplicant\|wpa_cli\|dhclient\|ifplugd\|dhcdbd\|dhcpcd\|NetworkManager\|knetworkmanager\|avahi-autoipd\|avahi-daemon\|wlassistant\|wifibox\|NetworkDispatcher"
+
+# =============================================================================
+# Funções utilitárias
+# =============================================================================
+
+usage() {
+    printf "Uso: %s <start|stop|check> <interface> [canal ou frequência]\n" "$(basename "$0")"
+    echo
+    echo "  start   — Habilita modo monitor na interface"
+    echo "  stop    — Desabilita modo monitor na interface"
+    echo "  check   — Lista processos que podem interferir"
+    echo
+    echo "Exemplos:"
+    echo "  $(basename "$0") start wlan0"
+    echo "  $(basename "$0") start wlan0 6"
+    echo "  $(basename "$0") stop mon0"
+    echo
+    exit 0
+}
+
+# Levanta interface usando 'ip' (moderno) com fallback para ifconfig
+iface_up() {
+    local iface="$1"
+    if $IP_CMD link set "$iface" up 2>/dev/null; then
+        return 0
+    elif [ -n "$IFCONFIG_CMD" ]; then
+        $IFCONFIG_CMD "$iface" up 2>/dev/null
+    fi
+}
+
+# Derruba interface usando 'ip'
+iface_down() {
+    local iface="$1"
+    if $IP_CMD link set "$iface" down 2>/dev/null; then
+        return 0
+    elif [ -n "$IFCONFIG_CMD" ]; then
+        $IFCONFIG_CMD "$iface" down 2>/dev/null
+    fi
+}
+
+# Define canal / frequência via iwconfig (fallback quando iw não suporta)
+set_channel_iwconfig() {
+    local iface="$1"
+    local ch="$2"
+    [ -z "$ch" ] && return 0
+    if [ "$ch" -lt 1000 ] 2>/dev/null; then
+        iwconfig "$iface" channel "$ch" >/dev/null 2>&1 || true
+    else
+        iwconfig "$iface" freq "${ch}000000" >/dev/null 2>&1 || true
+    fi
+}
+
+# Define canal / frequência via iw
+set_channel_iw() {
+    local iface="$1"
+    local ch="$2"
+    [ -z "$ch" ] && return 0
+    if [ "$ch" -lt 1000 ] 2>/dev/null; then
+        iw dev "$iface" set channel "$ch" 2>/dev/null || true
+    else
+        iw dev "$iface" set freq "$ch" 2>/dev/null || true
+    fi
+}
+
+# =============================================================================
+# Modo monitor — início (método legado: iwconfig)
+# =============================================================================
+startStdIface() {
+    local iface="$1"
+    local ch="${2:-}"
+    iwconfig "$iface" mode monitor >/dev/null 2>&1 || true
+    set_channel_iwconfig "$iface" "$ch"
+    iwconfig "$iface" key off >/dev/null 2>&1 || true
+    iface_up "$iface"
+    printf " (modo monitor habilitado)"
+}
+
+# =============================================================================
+# Modo monitor — parada (método legado)
+# =============================================================================
+stopStdIface() {
+    local iface="$1"
+    iface_down "$iface"
+    iwconfig "$iface" mode Managed >/dev/null 2>&1 || true
+    iface_down "$iface"
+    printf " (modo monitor desabilitado)"
+}
+
+# =============================================================================
+# Detecta módulo do kernel para a interface
+# =============================================================================
+getModule() {
+    MODULE=""
+    local iface="$1"
+    local srcver_file="/sys/class/net/${iface}/device/driver/module/srcversion"
+
+    [ -f "$srcver_file" ] || return 0
+
+    local srcver1
+    srcver1=$(cat "$srcver_file")
+
+    while IFS= read -r mod; do
+        local srcver2
+        srcver2=$(modinfo "$mod" 2>/dev/null | awk '/srcversion/{print $2}')
+        if [ "$srcver1" = "$srcver2" ]; then
+            MODULE="$mod"
+            break
+        fi
+    done < <(lsmod | awk 'NR>1{print $1}')
+}
+
+# =============================================================================
+# Detecta driver da interface via sysfs
+# =============================================================================
+getDriver() {
+    DRIVER=""
+    BUS=""
+    local iface="$1"
+    local driver_path="/sys/class/net/${iface}/device/driver"
+
+    if [ -e "$driver_path" ]; then
+        DRIVER=$(ls -l "$driver_path" | sed 's|^.*/\([a-zA-Z0-9_-]*\)$|\1|')
+        BUS=$(ls -l "$driver_path"    | sed 's|^.*/\([a-zA-Z0-9_-]*\)/.*$|\1|')
+    fi
+
+    # Normaliza variantes do Atheros
+    case "$DRIVER" in
+        *ath5k*) DRIVER="ath5k" ;;
+        *ath9k*) DRIVER="ath9k" ;;
+    esac
+
+    # WiLink (Texas Instruments)
+    if [ -z "$DRIVER" ] && [ -d /sys/class/net/tiwlan0/wireless ]; then
+        DRIVER="WiLink"
+    fi
+}
+
+# =============================================================================
+# Detecta stack mac80211 ou madwifi
+# =============================================================================
+getStack() {
+    local iface="${1:-}"
+    [ -z "$iface" ] && return 0
+
+    if [ -d "/sys/class/net/${iface}/phy80211/" ]; then
+        MAC80211=1
+    else
+        MAC80211=0
+    fi
+}
+
+# =============================================================================
+# Obtém nome do dispositivo phy (phy0, phy1, ...)
+# =============================================================================
+getPhy() {
+    PHYDEV=""
+    local iface="${1:-}"
+    [ -z "$iface" ] || [ -z "${MAC80211:-}" ] && return 0
+
+    if [ -d "/sys/class/net/${iface}/phy80211/" ]; then
+        PHYDEV=$(ls -l "/sys/class/net/${iface}/phy80211" \
+                 | sed 's|^.*/\([a-zA-Z0-9_-]*\)$|\1|')
+    fi
+
+    # Método alternativo via iw (mais confiável no kernel 6.x)
+    if [ -z "$PHYDEV" ] && [ "$USE_IW" = "1" ]; then
+        PHYDEV=$(iw dev "$iface" info 2>/dev/null \
+                 | awk '/wiphy/{print "phy" $2}')
+    fi
+}
+
+# =============================================================================
+# Encontra próximo nome disponível para interface monitor (mon0, mon1, ...)
+# =============================================================================
+getNewMon() {
+    local i=0
+    while [ -d "/sys/class/net/${MON_PREFIX}${i}/" ]; do
+        i=$((i + 1))
+    done
+    MONDEV="${MON_PREFIX}${i}"
+}
+
+# =============================================================================
+# Detecta chipset com base no driver
+# =============================================================================
+getChipset() {
+    CHIPSET="Desconhecido"
+    local iface="${2:-}"
+
+    case "$DRIVER" in
+        Otus|arusb_lnx)         CHIPSET="AR9001U" ;;
+        WiLink)
+            CHIPSET=$(dmesg 2>/dev/null | grep TIWLAN | grep CHIP | tail -1 \
+                      | awk -F' ' '{print $6}')
+            CHIPSET="${CHIPSET:+TI${CHIPSET}}"
+            CHIPSET="${CHIPSET:-Desconhecido}"
+            ;;
+        ar9170usb)
+            getPhy "$iface"
+            CHIPSET="Atheros $(dmesg 2>/dev/null | grep "$PHYDEV" \
+                    | grep 'is registered as' | cut -d: -f2 | cut -d' ' -f3)"
+            ;;
+        zd1211rw_mac80211)      CHIPSET="ZyDAS 1211" ;;
+        zd1211rw)
+            getPhy "$iface"
+            local usbp
+            usbp=$(dmesg 2>/dev/null | grep "$PHYDEV" | grep zd1211rw \
+                   | cut -dw -f2 | cut -d' ' -f2)
+            CHIPSET="ZyDAS $(dmesg 2>/dev/null | grep "$usbp" | grep chip \
+                   | tail -1 | cut -d: -f3 | cut -d' ' -f2)"
+            ;;
+        acx|acx-mac80211|acx1xx) CHIPSET="TI ACX1xx" ;;
+        adm8211)                 CHIPSET="ADMtek 8211" ;;
+        at76_usb)                CHIPSET="Atmel" ;;
+        b43|b43legacy|bcm43xx|wl)
+            CHIPSET="Broadcom"
+            if [ "$DRIVER" = "b43" ]; then
+                getPhy "$iface"
+                local tmp
+                tmp=$(dmesg 2>/dev/null | grep "$PHYDEV" | grep found \
+                      | cut -d: -f2 | cut -d' ' -f3)
+                [ "$tmp" = "4318" ] && CHIPSET="Broadcom $tmp"
+            fi
+            ;;
+        prism54|p54pci|p54usb)  CHIPSET="PrismGT" ;;
+        hostap)                  CHIPSET="Prism 2/2.5/3" ;;
+        r8180|rtl8180)          CHIPSET="RTL8180/RTL8185" ;;
+        rtl8187)
+            getPhy "$iface"
+            if [ -z "$PHYDEV" ]; then
+                CHIPSET="RTL8187"
+            else
+                local tmp2
+                tmp2=$(dmesg 2>/dev/null | grep "$PHYDEV" | grep hwaddr \
+                       | cut -d, -f2 | cut -d' ' -f2)
+                [ "$tmp2" = "RTL8187vB" ] && tmp2="RTL8187L"
+                CHIPSET="Realtek $tmp2"
+            fi
+            ;;
+        r8187)                   CHIPSET="RTL8187" ;;
+        rt2570|rt2500usb)        CHIPSET="Ralink 2570 USB" ;;
+        rt2400|rt2400pci)        CHIPSET="Ralink 2400 PCI" ;;
+        rt2500|rt2500pci)        CHIPSET="Ralink 2560 PCI" ;;
+        rt61|rt61pci)            CHIPSET="Ralink 2561 PCI" ;;
+        rt73|rt73usb)            CHIPSET="Ralink 2573 USB" ;;
+        rt2800|rt2800usb|rt3070sta) CHIPSET="Ralink RT2870/3070" ;;
+        # Adaptadores modernos Ralink/MediaTek
+        mt7601u)                 CHIPSET="MediaTek MT7601U" ;;
+        mt76*)                   CHIPSET="MediaTek MT76xx" ;;
+        rt2800pci)               CHIPSET="Ralink RT2860 PCI" ;;
+        ipw2100)                 CHIPSET="Intel 2100B" ;;
+        ipw2200)                 CHIPSET="Intel 2200BG/2915ABG" ;;
+        ipw3945|ipwraw|iwl3945)  CHIPSET="Intel 3945ABG" ;;
+        ipw4965|iwl4965)         CHIPSET="Intel 4965AGN" ;;
+        iwlagn|iwlwifi)
+            CHIPSET="Intel 4965/5xxx/6xxx/1xxx"
+            local det_str
+            det_str=$(dmesg 2>/dev/null | grep "$DRIVER" | grep Detected | tail -1)
+            if [ -n "$det_str" ]; then
+                for word in Link Wireless Ultimate Advanced; do
+                    if echo "$det_str" | grep -q "$word"; then
+                        local pos chip_tmp
+                        pos=$(echo "$det_str" | tr ' ' '\n' \
+                              | grep -n "$word" | cut -d: -f1)
+                        pos=$((pos + 1))
+                        chip_tmp=$(echo "$det_str" | tr ' ' '\n' | sed -n "${pos}p")
+                        CHIPSET="Intel $chip_tmp"
+                        break
+                    fi
+                done
+            fi
+            ;;
+        ath5k)
+            getPhy "$iface"
+            CHIPSET="Atheros $(dmesg 2>/dev/null | grep "$PHYDEV" \
+                    | grep 'chip found' | cut -d: -f2 | cut -d' ' -f3)"
+            ;;
+        ath_pci)    CHIPSET="Atheros" ;;
+        ath9k)
+            getPhy "$iface"
+            CHIPSET="Atheros $(dmesg 2>/dev/null | grep "$PHYDEV" \
+                    | grep Atheros | tail -1 | cut -d: -f2 | cut -d' ' -f3)"
+            ;;
+        # Chipsets modernos Atheros/Qualcomm (Parrot OS 7)
+        ath9k_htc|usb)           CHIPSET="AR9001/9002/9271" ;;
+        ath10k_usb|ath10k_pci)   CHIPSET="Qualcomm Atheros ath10k" ;;
+        ath11k*)                 CHIPSET="Qualcomm ath11k (WiFi 6)" ;;
+        orinoco)                 CHIPSET="Hermes/Prism" ;;
+        wl12xx)
+            CHIPSET="TI WL1251/WL1271"
+            local is51 is71
+            is51=$(dmesg 2>/dev/null | grep firmware | grep -c wl1251 || true)
+            is71=$(dmesg 2>/dev/null | grep firmware | grep -c wl1271 || true)
+            [ "$is51" != "0" ] && [ "$is71"  = "0" ] && CHIPSET="TI WL1251"
+            [ "$is71" != "0" ] && [ "$is51"  = "0" ] && CHIPSET="TI WL1271"
+            ;;
+        r871x_usb_drv)           CHIPSET="Realtek 81XX" ;;
+        carl9170)
+            getPhy "$iface"
+            CHIPSET=$(dmesg 2>/dev/null | grep usb | grep "$PHYDEV" \
+                      | awk '{print $3 " " $4}')
+            if ! echo "$CHIPSET" | grep -qi atheros; then
+                CHIPSET=$(dmesg 2>/dev/null | grep usb | grep "$PHYDEV" \
+                          | awk '{print $5 " " $6}')
+            fi
+            ;;
+        # Adaptadores USB modernos Realtek (comuns em Parrot OS)
+        rtl8192cu|rtl8192ce|rtl8192de|rtl8192se) CHIPSET="Realtek RTL819x" ;;
+        rtl8188eu|rtl8188*) CHIPSET="Realtek RTL8188" ;;
+        rtl8821*|rtl8822*) CHIPSET="Realtek RTL8821/8822 (AC)" ;;
+        rtl88xxau|rtl8812au|rtl8814au) CHIPSET="Realtek RTL8812/8814 (AC)" ;;
+    esac
+}
+
+# =============================================================================
+# Verifica e exibe processos que podem interferir
+# =============================================================================
+scanProcesses() {
+    local action="${1:-}"
+
+    # Parrot OS 7 usa systemctl
+    if [ "$action" = "kill" ]; then
+        systemctl stop NetworkManager  2>/dev/null || true
+        systemctl stop avahi-daemon    2>/dev/null || true
+    fi
+
+    local matched_pids=()
+    local matched_names=()
+
+    while IFS= read -r line; do
+        local pid name
+        pid=$(echo "$line" | awk '{print $1}')
+        name=$(echo "$line" | awk '{print $2}')
+        matched_pids+=("$pid")
+        matched_names+=("$name")
+    done < <(ps -A -o pid=,comm= | grep -E \
+        "wpa_action|wpa_supplicant|wpa_cli|dhclient|ifplugd|dhcdbd|dhcpcd|\
+NetworkManager|knetworkmanager|avahi-autoipd|avahi-daemon|wlassistant|\
+wifibox|NetworkDispatcher" | grep -v grep || true)
+
+    local match=${#matched_pids[@]}
+
+    if [ "$match" -gt 0 ] && [ "$action" != "kill" ]; then
+        echo
+        echo "Encontrados $match processo(s) que podem causar problemas."
+        echo "Se airodump-ng / aireplay-ng parar em pouco tempo, encerre-os!"
+        printf "\nPID\tNome\n"
+        for i in "${!matched_pids[@]}"; do
+            printf "%s\t%s\n" "${matched_pids[$i]}" "${matched_names[$i]}"
+        done
+    fi
+
+    if [ "$match" -gt 0 ] && [ "$action" = "kill" ]; then
+        echo "Encerrando processos interferentes..."
+        for pid in "${matched_pids[@]}"; do
+            kill "$pid" 2>/dev/null || true
+        done
+    fi
+}
+
+# Verifica processos usando uma interface específica
+checkProcessesIface() {
+    local iface="${1:-}"
+    [ -z "$iface" ] && return 0
+
+    while IFS= read -r pid; do
+        local pname
+        pname=$(ps -o comm= -p "$pid" 2>/dev/null || echo "desconhecido")
+        echo "Processo PID $pid ($pname) está usando a interface $iface"
+    done < <(ps auxw 2>/dev/null \
+             | grep "$iface" | grep -v grep | grep -v airmon \
+             | awk '{print $2}' || true)
+}
+
+# =============================================================================
+# Habilita modo monitor via iw (método moderno — nl80211)
+# =============================================================================
+startMac80211() {
+    local iface="$1"
+    local ch="${3:-}"
+
+    getPhy "$iface"
+    getNewMon
+
+    printf "%s\t\t%s\t%s - [%s]" "$iface" "$CHIPSET" "$DRIVER" "$PHYDEV"
+
+    if [ "$USE_IW" = "1" ]; then
+        # Método primário: iw dev add (nl80211)
+        IW_ERROR=$(iw dev "$iface" interface add "$MONDEV" type monitor 2>&1 \
+                   | grep "nl80211 not found" || true)
+
+        if [ -z "$IW_ERROR" ]; then
+            sleep 1
+            iface_up "$MONDEV"
+            set_channel_iw "$MONDEV" "$ch"
+            printf "\n\t\t\t\t(modo monitor habilitado em %s)" "$MONDEV"
+            return 0
+        fi
+    fi
+
+    # Fallback: sysfs add_iface
+    if [ -f "/sys/class/ieee80211/${PHYDEV}/add_iface" ]; then
+        printf "%s" "$MONDEV" > "/sys/class/ieee80211/${PHYDEV}/add_iface"
+        sleep 1
+        iface_up "$MONDEV"
+        set_channel_iwconfig "$MONDEV" "$ch"
+        printf "\n\t\t\t\t(modo monitor habilitado em %s via sysfs)" "$MONDEV"
+    else
+        printf "\n\nERRO: nl80211 não disponível e sysfs add_iface não encontrado.\n"
+        printf "Verifique se o driver suporta modo monitor.\n"
+    fi
+}
+
+# =============================================================================
+# Desabilita modo monitor via iw
+# =============================================================================
+stopMac80211() {
+    local iface="$1"
+
+    getPhy "$iface"
+    printf "%s\t\t%s\t%s - [%s]" "$iface" "$CHIPSET" "$DRIVER" "$PHYDEV"
+
+    local prefix_len=${#MON_PREFIX}
+    local iface_prefix="${iface:0:$prefix_len}"
+
+    if [ "$iface_prefix" = "$MON_PREFIX" ]; then
+        # Interface é uma mon* — remove via iw
+        if [ "$USE_IW" = "1" ]; then
+            IW_ERROR=$(iw dev "$iface" interface del 2>&1 \
+                       | grep "nl80211 not found" || true)
+            if [ -z "$IW_ERROR" ]; then
+                printf " (removida)"
+                return 0
+            fi
+        fi
+
+        # Fallback: sysfs remove_iface
+        if [ -f "/sys/class/ieee80211/${PHYDEV}/remove_iface" ]; then
+            printf "%s" "$iface" > "/sys/class/ieee80211/${PHYDEV}/remove_iface"
+            printf " (removida via sysfs)"
+        else
+            printf "\n\nERRO: Não foi possível remover a interface monitor.\n"
+        fi
+    else
+        # Interface física — apenas muda modo
+        iface_down "$iface"
+        iwconfig "$iface" mode managed 2>/dev/null || true
+        printf "\n\t\t\t\t(modo monitor desabilitado)"
+    fi
+}
+
+# =============================================================================
+# Lista interfaces wireless usando iw (moderno) e iwconfig (fallback)
+# =============================================================================
+listWirelessIfaces() {
+    local ifaces=()
+
+    # Método primário: iw (mais confiável no Parrot OS 7 / kernel 6.x)
+    if [ "$USE_IW" = "1" ]; then
+        while IFS= read -r line; do
+            ifaces+=("$line")
+        done < <(iw dev 2>/dev/null | awk '/Interface/{print $2}' || true)
+    fi
+
+    # Fallback: iwconfig
+    if [ ${#ifaces[@]} -eq 0 ]; then
+        while IFS= read -r line; do
+            ifaces+=("$line")
+        done < <(iwconfig 2>/dev/null \
+                 | grep -E '(IEEE|ESSID|802\.11|WLAN)' \
+                 | sed 's/^\([a-zA-Z0-9_.]*\) .*/\1/' \
+                 | grep -v wifi || true)
+    fi
+
+    printf '%s\n' "${ifaces[@]}"
+}
+
+# =============================================================================
+# Verifica permissões de root
+# =============================================================================
+check_root() {
+    local uid
+    uid=$(id -u 2>/dev/null || echo "${UID:-1}")
+    if [ "$uid" != "0" ]; then
+        echo "Execute como root." >&2
+        exit 1
+    fi
+}
+
+# =============================================================================
+# Verifica se wireless-tools estão instalados
+# =============================================================================
+check_tools() {
+    if ! command -v iwconfig >/dev/null 2>&1; then
+        echo "wireless-tools não encontrado. Instale: apt install wireless-tools" >&2
+        exit 1
+    fi
+}
+
+# =============================================================================
+# INÍCIO — verificações iniciais
+# =============================================================================
+check_root
+check_tools
+
+# --- Modo check / kill -------------------------------------------------------
+if [ "${1:-}" = "check" ] || [ "${1:-}" = "start" ]; then
+    scanProcesses
+
+    while IFS= read -r iface; do
+        checkProcessesIface "$iface"
+    done < <(listWirelessIfaces)
+
+    if [ "${2:-}" = "kill" ]; then
+        scanProcesses "kill"
+    fi
+
+    if [ "${1:-}" = "check" ]; then
+        exit 0
+    fi
+fi
+
+# --- Valida argumentos -------------------------------------------------------
+printf "\n\n"
+
+if [ $# -ne 0 ]; then
+    case "${1:-}" in
+        start|stop) ;;
+        *) usage ;;
+    esac
+    if [ -z "${2:-}" ]; then
+        usage
+    fi
+fi
+
+# =============================================================================
+# Cabeçalho da tabela
+# =============================================================================
+printf "Interface\tChipset\t\tDriver\n\n"
+
+# =============================================================================
+# Loop principal — processa interfaces wireless
+# =============================================================================
+while IFS= read -r iface; do
+    [ -z "$iface" ] && continue
+
+    getModule  "$iface"
+    getDriver  "$iface"
+    getStack   "$iface"
+    getChipset "$DRIVER" "$iface"
+
+    # ── mac80211 (nl80211) — padrão moderno, Parrot OS 7 ────────────────────
+    if [ "$MAC80211" = "1" ]; then
+        getPhy "$iface"
+        getNewMon
+        printf "%s\t\t%s\t%s - [%s]" "$iface" "$CHIPSET" "$DRIVER" "$PHYDEV"
+
+        if [ "${1:-}" = "start" ] && [ "${2:-}" = "$iface" ]; then
+            echo
+            # Para processos interferentes antes de iniciar
+            scanProcesses "kill"
+            sleep 0.5
+
+            # Derruba interface antes para evitar problemas com alguns drivers
+            iface_down "$iface" 2>/dev/null || true
+            sleep 0.3
+
+            if [ "$USE_IW" = "1" ]; then
+                IW_ERROR=$(iw dev "$iface" interface add "$MONDEV" \
+                           type monitor 2>&1 | grep "nl80211 not found" || true)
+
+                if [ -z "$IW_ERROR" ]; then
+                    sleep 1
+                    iface_up "$MONDEV"
+                    [ -n "${3:-}" ] && set_channel_iw "$MONDEV" "${3}"
+                    printf "\t\t\t\t(modo monitor habilitado em %s)\n" "$MONDEV"
+                    continue
+                fi
+            fi
+
+            # Fallback: sysfs
+            if [ -f "/sys/class/ieee80211/${PHYDEV}/add_iface" ]; then
+                printf "%s" "$MONDEV" > "/sys/class/ieee80211/${PHYDEV}/add_iface"
+                sleep 1
+                iwconfig "$MONDEV" mode Monitor 2>/dev/null || true
+                [ -n "${3:-}" ] && set_channel_iwconfig "$MONDEV" "${3}"
+                iface_up "$MONDEV"
+                printf "\t\t\t\t(modo monitor habilitado em %s via sysfs)\n" "$MONDEV"
+            else
+                printf "\n\nERRO: nl80211 não suportado e sysfs indisponível.\n"
+                printf "Verifique o driver do adaptador.\n"
+            fi
+        fi
+
+        if [ "${1:-}" = "stop" ] && [ "${2:-}" = "$iface" ]; then
+            echo
+            local_prefix="${iface:0:${#MON_PREFIX}}"
+
+            if [ "$local_prefix" = "$MON_PREFIX" ]; then
+                if [ "$USE_IW" = "1" ]; then
+                    IW_ERROR=$(iw dev "$iface" interface del 2>&1 \
+                               | grep "nl80211 not found" || true)
+                    if [ -z "$IW_ERROR" ]; then
+                        printf "\t\t\t\t(%s removida)\n" "$iface"
+                        continue
+                    fi
+                fi
+                if [ -f "/sys/class/ieee80211/${PHYDEV}/remove_iface" ]; then
+                    printf "%s" "$iface" \
+                        > "/sys/class/ieee80211/${PHYDEV}/remove_iface"
+                    printf "\t\t\t\t(%s removida via sysfs)\n" "$iface"
+                else
+                    printf "\n\nERRO: Não foi possível remover %s\n" "$iface"
+                fi
+            else
+                iface_down "$iface"
+                iwconfig "$iface" mode managed 2>/dev/null || true
+                printf "\t\t\t\t(modo monitor desabilitado)\n"
+            fi
+        fi
+
+        echo
+        continue
+    fi
+
+    # ── Orinoco / Hermes ─────────────────────────────────────────────────────
+    if [ "$DRIVER" = "orinoco" ] || \
+       iwpriv "$iface" 2>/dev/null | grep -q get_rid || \
+       iwpriv "$iface" 2>/dev/null | grep -q dump_recs; then
+        printf "%s\t\tHermesI\t\torinoco" "$iface"
+        if [ "${1:-}" = "start" ] && [ "${2:-}" = "$iface" ]; then
+            set_channel_iwconfig "$iface" "$CH"
+            iwpriv "$iface" monitor 1 "$CH" >/dev/null 2>&1 || true
+            iface_up "$iface"
+            printf " (modo monitor habilitado)"
+        fi
+        if [ "${1:-}" = "stop" ] && [ "${2:-}" = "$iface" ]; then
+            iface_down "$iface"
+            iwpriv "$iface" monitor 0 >/dev/null 2>&1 || true
+            iwconfig "$iface" mode Managed >/dev/null 2>&1 || true
+            printf " (modo monitor desabilitado)"
+        fi
+        echo; continue
+    fi
+
+    # ── Realtek RTL819x ──────────────────────────────────────────────────────
+    if [ "$DRIVER" = "rtl819xU" ]; then
+        printf "%s\t\tRealtek 819x\trtl819xU" "$iface"
+        [ "${1:-}" = "start" ] && [ "${2:-}" = "$iface" ] && startStdIface "$iface" "$CH"
+        [ "${1:-}" = "stop"  ] && [ "${2:-}" = "$iface" ] && stopStdIface  "$iface"
+        echo; continue
+    fi
+
+    # ── Intel IPW2100 ────────────────────────────────────────────────────────
+    if [ "$DRIVER" = "ipw2100" ] || \
+       iwpriv "$iface" 2>/dev/null | grep -q set_crc_check; then
+        printf "%s\t\tIntel 2100B\tipw2100" "$iface"
+        [ "${1:-}" = "start" ] && [ "${2:-}" = "$iface" ] && startStdIface "$iface" "$CH"
+        [ "${1:-}" = "stop"  ] && [ "${2:-}" = "$iface" ] && stopStdIface  "$iface"
+        echo; continue
+    fi
+
+    # ── Intel IPW2200 ────────────────────────────────────────────────────────
+    if [ "$DRIVER" = "ipw2200" ] || \
+       iwpriv "$iface" 2>/dev/null | grep -q sw_reset; then
+        local modver
+        modver=$(modinfo ipw2200 2>/dev/null | awk '/^version/{print $2}')
+        if echo "$modver" | grep -qE '^1\.0\.(0|1|2|3)$'; then
+            echo "Modo monitor não suportado nesta versão do ipw2200. Atualize."
+        else
+            printf "%s\t\tIntel 2200BG\tipw2200" "$iface"
+            [ "${1:-}" = "start" ] && [ "${2:-}" = "$iface" ] && startStdIface "$iface" "$CH"
+            [ "${1:-}" = "stop"  ] && [ "${2:-}" = "$iface" ] && stopStdIface  "$iface"
+            echo "$modver" | grep -qE '^1\.0\.(5|7|8|11)$' && \
+                printf " (Aviso: versão do módulo antiga, atualize)"
+        fi
+        echo; continue
+    fi
+
+    # ── Ralink RT61 / RT73 ───────────────────────────────────────────────────
+    for rt_driver in rt61 rt73; do
+        if [ "$DRIVER" = "$rt_driver" ]; then
+            case "$rt_driver" in
+                rt61) printf "%s\t\tRalink 2561 PCI\trt61" "$iface" ;;
+                rt73) printf "%s\t\tRalink 2573 USB\trt73" "$iface" ;;
+            esac
+            if [ "${1:-}" = "start" ] && [ "${2:-}" = "$iface" ]; then
+                startStdIface "$iface" "$CH"
+                iwpriv "$iface" rfmontx 1 2>/dev/null || true
+                iwpriv "$iface" 2>/dev/null | grep -q forceprismheader && \
+                    iwpriv "$iface" forceprismheader 1 || true
+            fi
+            [ "${1:-}" = "stop" ] && [ "${2:-}" = "$iface" ] && stopStdIface "$iface"
+            echo; continue 2
+        fi
+    done
+
+    # ── Ralink RT2500 ────────────────────────────────────────────────────────
+    if [ "$DRIVER" = "rt2500" ] || \
+       iwpriv "$iface" 2>/dev/null | grep -q bbp; then
+        printf "%s\t\tRalink 2560 PCI\trt2500" "$iface"
+        if [ "${1:-}" = "start" ] && [ "${2:-}" = "$iface" ]; then
+            iwconfig "$iface" mode ad-hoc 2>/dev/null || true
+            startStdIface "$iface" "$CH"
+        fi
+        [ "${1:-}" = "stop" ] && [ "${2:-}" = "$iface" ] && stopStdIface "$iface"
+        echo; continue
+    fi
+
+    # ── Ralink RT2570 ────────────────────────────────────────────────────────
+    if [ "$DRIVER" = "rt2570" ] || \
+       { iwpriv "$iface" 2>/dev/null | grep -q wpapsk && \
+         ! iwpriv "$iface" 2>/dev/null | grep -q get_RaAP_Cfg; }; then
+        printf "%s\t\tRalink 2570 USB\trt2570" "$iface"
+        if [ "${1:-}" = "start" ] && [ "${2:-}" = "$iface" ]; then
+            iwconfig "$iface" mode ad-hoc 2>/dev/null || true
+            startStdIface "$iface" "$CH"
+            iwpriv "$iface" 2>/dev/null | grep -q forceprismheader && \
+                iwpriv "$iface" forceprismheader 1 || true
+        fi
+        [ "${1:-}" = "stop" ] && [ "${2:-}" = "$iface" ] && stopStdIface "$iface"
+        echo; continue
+    fi
+
+    # ── RTL8180/RTL8185 ──────────────────────────────────────────────────────
+    if [ "$DRIVER" = "r8180" ] || \
+       iwpriv "$iface" 2>/dev/null | grep -q debugtx; then
+        printf "%s\t\tRTL8180/RTL8185\tr8180" "$iface"
+        if [ "${1:-}" = "start" ] && [ "${2:-}" = "$iface" ]; then
+            set_channel_iwconfig "$iface" "$CH"
+            iwpriv "$iface" 2>/dev/null | grep -q prismhdr && \
+                iwpriv "$iface" prismhdr 1 >/dev/null 2>&1 || true
+            iface_up "$iface"
+            printf " (modo monitor habilitado)"
+        fi
+        [ "${1:-}" = "stop" ] && [ "${2:-}" = "$iface" ] && stopStdIface "$iface"
+        echo; continue
+    fi
+
+    # ── RTL8187 ──────────────────────────────────────────────────────────────
+    if [ "$DRIVER" = "r8187" ] || \
+       iwpriv "$iface" 2>/dev/null | grep -q badcrc; then
+        printf "%s\t\tRTL8187\t\tr8187" "$iface"
+        if [ "${1:-}" = "start" ] && [ "${2:-}" = "$iface" ]; then
+            set_channel_iwconfig "$iface" "$CH"
+            iwpriv "$iface" 2>/dev/null | grep -q rawtx && \
+                iwpriv "$iface" rawtx 1 >/dev/null 2>&1 || true
+            iface_up "$iface"
+            printf " (modo monitor habilitado)"
+        fi
+        [ "${1:-}" = "stop" ] && [ "${2:-}" = "$iface" ] && stopStdIface "$iface"
+        echo; continue
+    fi
+
+    # ── ZyDAS 1211 ───────────────────────────────────────────────────────────
+    if [ "$DRIVER" = "zd1211rw" ] || \
+       iwpriv "$iface" 2>/dev/null | grep -q get_regdomain; then
+        printf "%s\t\tZyDAS 1211\tzd1211rw" "$iface"
+        [ "${1:-}" = "start" ] && [ "${2:-}" = "$iface" ] && startStdIface "$iface" "$CH"
+        [ "${1:-}" = "stop"  ] && [ "${2:-}" = "$iface" ] && stopStdIface  "$iface"
+        echo; continue
+    fi
+
+    # ── Prism54 / PrismGT ────────────────────────────────────────────────────
+    if [ "$DRIVER" = "prism54" ] || \
+       iwpriv "$iface" 2>/dev/null | grep -q getPolicy; then
+        printf "%s\t\tPrismGT\t\tprism54" "$iface"
+        if [ "${1:-}" = "start" ] && [ "${2:-}" = "$iface" ]; then
+            iface_up "$iface"
+            set_channel_iwconfig "$iface" "$CH"
+            iwpriv "$iface" set_prismhdr 1 >/dev/null 2>&1 || true
+            printf " (modo monitor habilitado)"
+        fi
+        [ "${1:-}" = "stop" ] && [ "${2:-}" = "$iface" ] && stopStdIface "$iface"
+        echo; continue
+    fi
+
+    # ── HostAP / Prism 2 ─────────────────────────────────────────────────────
+    if [ "$DRIVER" = "hostap" ] || \
+       iwpriv "$iface" 2>/dev/null | grep -q antsel_rx; then
+        printf "%s\t\tPrism 2/2.5/3\tHostAP" "$iface"
+        if [ "${1:-}" = "start" ] && [ "${2:-}" = "$iface" ]; then
+            set_channel_iwconfig "$iface" "$CH"
+            iwpriv "$iface" monitor_type 1 >/dev/null 2>&1 || true
+            iface_up "$iface"
+            printf " (modo monitor habilitado)"
+        fi
+        [ "${1:-}" = "stop" ] && [ "${2:-}" = "$iface" ] && stopStdIface "$iface"
+        echo; continue
+    fi
+
+    # ── ndiswrapper ──────────────────────────────────────────────────────────
+    if [ "$DRIVER" = "ndiswrapper" ] || \
+       iwpriv "$iface" 2>/dev/null | grep -q ndis_reset; then
+        printf "%s\t\tDesconhecido\tndiswrapper (MONITOR NÃO SUPORTADO)" "$iface"
+        [ "${1:-}" = "stop" ] && [ "${2:-}" = "$iface" ] && stopStdIface "$iface"
+        echo; continue
+    fi
+
+    # ── Driver genérico conhecido ─────────────────────────────────────────────
+    if [ -n "$DRIVER" ]; then
+        if [ -z "$CHIPSET" ] || [ "$CHIPSET" = "Desconhecido" ]; then
+            printf "%s\t\tDESCONHECIDO\t%s" "$iface" "$DRIVER"
+        else
+            printf "%s\t\t%s\t%s" "$iface" "$CHIPSET" "$DRIVER"
+        fi
+        [ "${1:-}" = "start" ] && [ "${2:-}" = "$iface" ] && startStdIface "$iface" "$CH"
+        [ "${1:-}" = "stop"  ] && [ "${2:-}" = "$iface" ] && stopStdIface  "$iface"
+        echo; continue
+    fi
+
+    # ── Interface sem driver identificado ────────────────────────────────────
+    printf "%s\t\tDesconhecido\tDesconhecido (MONITOR NÃO SUPORTADO)\n" "$iface"
+
+done < <(listWirelessIfaces)
+
+# Linha final após tabela
+printf "\n"
