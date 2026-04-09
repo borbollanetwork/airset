@@ -1,0 +1,192 @@
+.pt-0{
+	padding-top: 0px !important;
+}
+.pt-10{
+	padding-top: 10px !important;
+}
+.pt-15{
+	padding-top: 15px !important;
+}
+.pt-20{
+	padding-top: 20px !important;
+}
+.pt-25{
+	padding-top: 25px !important;
+}
+.pt-30{
+	padding-top: 30px !important;
+}
+.pt-35{
+	padding-top: 35px !important;
+}
+
+
+.pb-0{
+	padding-bottom: 0px !important;
+}
+.pb-10{
+	padding-bottom: 10px !important;
+}
+.pb-15{
+	padding-bottom: 15px !important;
+}
+.pb-20{
+	padding-bottom: 20px !important;
+}
+.pb-25{
+	padding-bottom: 25px !important;
+}
+.pb-30{
+	padding-bottom: 30px !important;
+}
+.pb-35{
+	padding-bottom: 35px !important;
+}
+
+.text-white{
+	color: #fff;
+}
+
+.text-bold{
+	font-weight: bold;
+}
+
+.text-net{
+	color: #003366;
+}
+
+.net-header{
+	 background: url(../img/NET-fundo.jpg) repeat-x top left;
+}
+.areaTelevendas {
+    width: 340px;
+    height: 60px;
+    padding: 15px 0px 15px 0px;
+    margin-right: 20px;
+    text-align: right;
+    float: left;
+    }
+
+
+    .footer {
+    width: 100%;
+    height: auto;
+    background-color: #0061B2;
+    margin-top: 5px;
+    float: left;
+}
+
+.footerContent {
+    width: 940px;
+    height: auto;
+    text-align: center;
+    background-color: #0061B2;
+    padding-top: 20px;
+    margin: auto;}
+
+    .footerTitle {
+    width: 940px;
+    height: auto;
+    padding-bottom: 10px;
+    border-bottom: 1px solid #7197AD;
+    text-align: center;
+    float: left;}
+
+    .footerLinks {
+    width: 940px;
+    height: auto;
+    margin-top: 15px;
+    border-bottom: 1px solid #7197AD;
+    padding-bottom: 15px;
+    margin-bottom: 20px;
+    float: left;}
+
+    .rodape {
+    font-family: Arial, Helvetica, sans-serif;
+    font-size: 11px;
+    text-align: center;
+    color: #FFF;
+    margin-top: 30px;
+    margin-bottom: 20px;
+}
+    .footerLinksCol {
+    width: 230px;
+    height: auto;
+    margin-right: 5px;
+    float: left;
+}
+.footerLinksTitle {
+    width: 90%;
+    height: auto;
+    margin-bottom: 5px;
+    font-family: Arial, Helvetica, sans-serif;
+    font-size: 18px;
+    font-weight: bold;
+    color: #00A4EC;
+    text-align: left;
+    text-transform: uppercase;
+    float: left;
+    }
+
+    .footerLinksContent {
+    width: 90%;
+    height: auto;
+    margin-bottom: 5px;
+    font-family: Arial, Helvetica, sans-serif;
+    font-size: 12px;
+    line-height: 21px;
+    color: #FFF;
+    text-align: left;
+    text-transform: uppercase;
+    text-decoration: none;
+    float: left;}
+
+    .footerLinksContentB {
+    width: 90%;
+    height: auto;
+    margin-bottom: 5px;
+    border-bottom: 1px solid #7197AD;
+    font-family: Arial, Helvetica, sans-serif;
+    font-size: 12px;
+    line-height: 21px;
+    color: #fff;
+    text-align: left;
+    text-transform: uppercase;
+    text-decoration: none;
+    float: left;}
+
+    .footerLinksContentB a {
+    color: #FFF;
+    text-align: left;
+    text-transform: uppercase;
+    float: left;
+}
+
+.footerLinksContent a {
+    color: #FFF;
+    text-align: left;
+    text-transform: uppercase;
+    float: left;
+}
+
+    .footerLinksContentB a:visited {
+    color: #FFF;
+    text-align: left;
+    text-transform: uppercase;
+    text-decoration: none;
+    float: left;
+}
+
+.footerLinksTitle a:visited {
+    color: #00A4EC;
+    text-align: left;
+    text-transform: uppercase
+ text-decoration:none;
+    float: left;}
+
+   .footerLinksTitle a {
+    color: #00A4EC;
+    text-align: left;
+    text-transform: uppercase
+ text-decoration:none;
+    float: left;

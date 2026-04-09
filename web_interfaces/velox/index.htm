@@ -1,0 +1,1173 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01//EN" "http://www.w3.org/TR/html4/strict.dtd">
+<html lang="pt-br">   
+    <head>
+        <!-- METAS -->
+        <meta charset="utf-8">
+        <META HTTP-EQUIV="CACHE-CONTROL" CONTENT="NO-CACHE">        
+
+        <!-- TITLE -->
+        <title>Wizard Oi</title>
+
+        <!-- FAVICON -->
+        <link rel="shortcut icon" href="favicon.ico" >
+
+        <!-- CSS -->
+        <style type="text/css">
+            /*
+
+            TABLE OF CONTENTS (SEARCH)
+                @CSS-RESET
+                @GLOBAL
+                @FONTS
+
+            */
+
+
+            /*------------------ @CSS-RESET ------------------*/
+
+            html, body, div, span, object, iframe,
+            h1, h2, h3, h4, h5, h6, p, blockquote,
+            pre, a, abbr, acronym, address, code,
+            del, dfn, em, img, q, dl, dt, dd, ol, 
+            ul, li, fieldset, form, label, legend, table,
+            tr, td, caption 
+            {
+                margin: 0px auto;
+                padding: 0px;
+                border: 0;
+                border-collapse: separate; 
+                border-spacing: 0;
+                list-style: none;
+                text-decoration: none;
+                font-style: normal;
+                font-weight: normal;
+            }
+
+            /*------------------ @FONTS ------------------*/
+            @font-face {
+                font-family: 'TradeGothicRegular';
+                src: url('fonts/tradg___-webfont.eot');
+                src: url('fonts/tradg___-webfontd41d.eot?#iefix') format('embedded-opentype'),
+                    url('fonts/tradg___-webfont.woff') format('woff'),
+                    url('fonts/tradg___-webfont.ttf') format('truetype'),
+                    url('fonts/tradg___-webfont.svg#TradeGothicRegular') format('svg');
+                font-weight: normal;
+                font-style: normal;
+            }
+
+            @font-face {
+                font-family: 'TradeGothicBoldTwo';
+                src: url('fonts/tradgbt_-webfont.eot');
+                src: url('fonts/tradgbt_-webfontd41d.eot?#iefix') format('embedded-opentype'),
+                    url('fonts/tradgbt_-webfont.woff') format('woff'),
+                    url('fonts/tradgbt_-webfont.ttf') format('truetype'),
+                    url('fonts/tradgbt_-webfont.svg#TradeGothicBoldTwo') format('svg');
+                font-weight: normal;
+                font-style: normal;
+            }
+
+
+            /*------------------ @GLOBAL ------------------*/
+            html{
+                height: 100%;
+            }
+
+            body{
+                font-family: 'TradeGothicRegular', Arial, Helvetica, sans-serif;
+                background-color: #009ba8;
+                color: #FFF;
+                height: 100%;
+            }
+
+            input{
+                font-family: 'TradeGothicRegular';
+                border: 0;
+                color: #009ba8;
+            }
+
+            a{
+                color: #009ba8;
+            }
+
+
+
+            
+
+            /*
+            
+            TABLE OF CONTENTS (SEARCH)
+                @LAYOUT
+                    @LAYOUT:BG
+                    @LAYOUT:TOP
+            
+            */
+
+
+            /*------------------ @LAYOUT ------------------*/
+
+            div.layout{
+                width: 100%;
+                height: 100%;
+                position: absolute;
+                min-height: 670px;
+                min-width: 1000px;
+            }
+
+            table.layout_pages{
+                position: absolute;
+                min-height: 670px;
+            }
+
+
+
+            /* @LAYOUT:BG */
+            div#layout_bg_left{
+                background: url(images/layout_bg_left.gif) top left repeat-y;
+            }
+
+            div#layout_bg_right{
+                background: url(images/layout_bg_right.gif) top right repeat-y;
+            }
+
+
+            /* @LAYOUT:TOP */
+            div#layout_top{
+                background: url(images/layout_divisor.gif) bottom repeat-x;
+                height: 94px;
+            }
+
+            div#layout_top_content{
+                width: 850px;
+                padding-top: 15px;
+            }
+
+
+            /* @LAYOUT:CONTENT */
+            div#layout_content{
+                width: 850px;
+                height: 480px;
+                *padding: 45px 0 45px 0; /*IE7*/ 
+            }
+            /*
+            
+            TABLE OF CONTENTS (SEARCH)
+                @HOME
+                    @HOME:STRUCTURE
+                    @HOME:CONTENT
+            
+            */
+
+
+            /*------------------ @HOME ------------------*/
+
+
+            /* @HOME:STRUCTURE */
+            div.home_structure{
+                width: 50%;
+                height: 100%;
+                float: left;
+                min-height: 670px;
+            }
+
+            div#home_structure_left{
+                background: url(../images/layout_divisor.gif) top right repeat-y;
+            }
+
+
+            /* @HOME:CONTENT */
+            div.home_content{
+                position: absolute;
+                height: 404px;
+                top: 50%;
+                margin-top: -220px;
+            }
+
+            div#home_content_house{
+                width: 208px;
+                left: 25%;
+                margin-left: -104px;
+            }
+
+            div#home_content_company{
+                width: 274px;
+                left: 75%;
+                margin-left: -137px;
+            }
+
+            div.home_content_brand{
+                text-align: center;
+                margin-bottom: 60px;
+            }
+
+            div.home_content_txt_oi{
+                margin-bottom: 11px;
+            }
+
+            div.home_content_txt_option{
+                margin-bottom: 27px;
+            }
+
+            div.home_content_btn{
+            }
+            /*
+            
+            TABLE OF CONTENTS (SEARCH)
+                
+                    @PAGE:CONTENT
+                        @PAGE:CONTENT-TITLE
+                        @PAGE:CONTENT-TXT
+                        @PAGE:CONTENT-BTNS
+                        @PAGE:CONTENT-LOAD
+                        @PAGE:CONTENT-FORM
+                        @PAGE:CONTENT-HELP
+                        @PAGE:CONTENT-TABLE
+                    @PAGE:PAGES
+                        @PAGE:WELCOME
+                        @PAGE:DETECTING // @PAGE:SETTING
+                        @PAGE:SET-MODEM-RESIDENTIAL
+                        @PAGE:SET-MODEM-COMMERCIAL
+                        @PAGE:HOST
+                        @PAGE:AUTHENTICATION-FAILURE
+                        @PAGE:AUTHENTICATION-FAILURE-VELOX // @PAGE:AUTHENTICATION-FAILURE-VELOX-VIDEO
+                        @PAGE:INTERFACE-FAILURE
+                        @PAGE:TROUBLESHOOTING
+                        @PAGE:MODEM-OFF-PROBLEM
+                        @PAGE:ADSL-OFF-PROBLEM
+                        @PAGE:ETHERNET-SHIELD-PROBLEM
+                        @PAGE:USER-PASSWORD
+                        @PAGE:CONNECTIONLESS
+                        @PAGE:NO-NAVIGAGION
+                        @PAGE:SLOW-BROWSING
+                        @PAGE:CONFIGURE-WIFI
+                        @PAGE:CONFIGURED
+                        @PAGE:BLANK
+                        @PAGE:REDE-FON
+                        @PAGE:REGISTERED-RESIDENTIAL
+                        @PAGE:REGISTERED-COMMERCIAL
+                        @PAGE:MODEM_INSTALLE
+            
+            */
+
+
+
+            /*------------------ @PAGE:CONTENT ------------------*/
+            div.page_content{
+                height: 435px;
+            }
+
+
+            /* @PAGE:CONTENT-TITLE */
+            div.page_title{
+                font-family: 'TradeGothicBoldTwo';
+                font-size: 22px;
+                margin-bottom: 7px;
+            }
+
+            div.page_subtitle_special{
+                font-size: 21px;
+                line-height: 36px;
+            }
+
+            div.page_orador_oi_title{
+                margin-bottom: 13px;
+            }
+
+
+            /* @PAGE:CONTENT-TXT */
+            div.page_txt{
+                font-size: 18px;
+                line-height: 28px;
+            }
+
+            div.page_txt p{
+                margin-bottom: 25px;
+            }
+
+            div.page_txt a{
+                color: #20ebe7;
+                text-decoration: underline;
+            }
+
+            div.page_txt a:hover{
+                color: #f4cd58;
+            }
+
+            span.page_txt_highlights{
+                font-family: 'TradeGothicBoldTwo';
+            }
+
+
+            /* @PAGE:CONTENT-BTNS */
+            div.page_btns{
+                margin-top: 15px;
+                height: 30px;
+                text-align: right;
+            }
+
+            div.page_btns img{
+                margin-left: 11px;
+            }
+
+
+            /* @PAGE:CONTENT-LOAD */
+            div.page_txt_load{
+                text-align: center;
+                font-size: 30px;
+                margin-bottom: 31px;
+            }
+
+            div.page_load{
+                text-align: center;
+            }
+
+
+            /* @PAGE:CONTENT-FORM */
+            div.page_form{
+                margin-top: 42px;
+            }
+
+            div.page_form_problem{
+                margin-top: 25px;
+            }
+
+            div.page_form_line{
+                height: 25px;
+                margin-bottom: 14px;
+            }
+
+            div.page_form_line_name{
+                font-family: 'TradeGothicBoldTwo';
+                float: left;
+                text-align: right;
+                font-size: 16px;
+                margin: 4px 24px 0 0;
+            }
+
+            div.page_form_line_field{
+                float: left;
+                width: 240px;
+                height: 25px;
+                margin-right: 9px;
+            }
+
+            div.page_form_line_field input{
+                background-color: #f5f5f5;
+                padding: 4px 3px 3px 3px;
+                font-size: 14px;
+                margin-left: 2px;
+                margin-top: 1px\9; /*IE8 and below*/
+                width: 230px;
+            }
+
+            div.page_form_line_field_input{
+                background-image: url(../images/page_form_field.png);
+            }
+
+            div.page_form_line_description{
+                float: left;
+                font-size: 13px;
+                margin-top: 8px;
+            }
+
+            select.page_form_problem{
+                width: 397px;
+            }
+
+            div.page_form_radio_button{
+                font-size: 14px;
+                line-height: 24px;
+            }
+
+            div.page_form_radio_button input{
+                margin-left: 0;
+            }
+
+            div.page_form_radio_button a{
+                color: #20ebe7;
+                text-decoration: underline;
+            }
+
+            div.page_form_radio_button a:hover{
+                color: #f4cd58;
+            }
+
+
+            /* @PAGE:CONTENT-HELP */
+            div.page_help{
+                margin-top: 65px;
+            }
+
+            div.page_help_icon{
+                float: left;
+                margin-right: 7px;
+            }
+
+            div.page_help_txt{
+                float: left;
+                font-size: 20px;
+                margin-top: 3px;
+                line-height: 21px;
+            }
+
+            div.page_help_txt a{
+                color: #20ebe7;
+                text-decoration: underline;
+            }
+
+            div.page_help_txt a:hover{
+                color: #f4cd58;
+            }
+
+
+            /* @PAGE:CONTENT-TABLE */
+            div.page_table{
+                border-bottom: 1px solid #4db8c1;
+            }
+
+            div.page_table_title{
+                margin-bottom: 20px;
+            }
+
+            div.page_table_problem{
+                width: 228px;
+                float: left;
+            }
+
+            div.page_table_problem_content{
+                font-family: 'TradeGothicBoldTwo';
+                font-size: 20px;
+                padding: 27px;
+            }
+
+            div.page_table_steps{
+                width: 619px;
+                float: left;
+                border-left: 1px solid #4db8c1; 
+            }
+
+            div.page_table_steps_content{
+                padding: 27px 27px 7px 27px;
+            }
+
+            div.page_table_steps_list{
+                font-size: 16px;
+                line-height: 24px;
+                margin-bottom: 18px;
+            }
+
+            div.page_table_steps_list_bold{
+                font-weight: bold;
+            }
+
+            div.page_table_steps_sublist{
+                font-size: 13px;
+                line-height: 18px;
+            }
+
+            div.page_table_steps_list img{
+                float: left;
+                margin: 6px 9px 0 0;
+            }
+
+            div.page_table_steps_list_title{
+                font-weight: bold;
+                text-transform: uppercase;
+                margin-bottom: 7px;
+            }
+
+            div.page_table_top{
+                font-family: 'TradeGothicBoldTwo';
+                background-color: #00717d;
+                padding: 16px 0 16px 27px;
+                font-size: 18px;
+            }
+
+            div.page_table_clear{
+                clear: both; 
+                height: 0;
+            }
+
+
+
+            /*------------------ @PAGE:PAGES ------------------*/
+
+
+            /* @PAGE:WELCOME */
+            div#page_welcome_content{
+                padding-top: 130px;
+            }
+
+
+            /* @PAGE:DETECTING // @PAGE:SETTING */
+            div#page_detecting_content, div#page_setting_content{
+                padding-top: 160px;
+            }
+
+
+            /* @PAGE:SET-MODEM-RESIDENTIAL */
+            div#page_set_modem_residential_content{
+                padding-top: 5px;
+            }
+
+            div.page_form_name_set_modem_residential{
+                width: 100px;
+            }
+
+
+            /* @PAGE:SET-MODEM-COMMERCIAL */
+            div#page_set_modem_commercial_content{
+                padding-top: 105px;
+            }
+
+            div.page_form_name_set_modem_commercial{
+                width: 50px;
+            }
+
+
+            /* @PAGE:HOST */
+            div#page_host_content{
+                padding-top: 130px;
+            }
+
+
+            /* @PAGE:AUTHENTICATION-FAILURE */
+            div#page_authentication_failure_content{
+                padding-top: 45px;
+            }
+
+            div.page_authentication_failure_description{
+                font-family: 'TradeGothicBoldTwo';
+                font-size: 14px;
+                margin-top: 38px;
+            }
+
+
+            /* @PAGE:AUTHENTICATION-FAILURE-VELOX // @PAGE:AUTHENTICATION-FAILURE-VELOX-VIDEO */
+            div#page_authentication_failure_velox_content, div#page_authentication_failure_velox_video_content{
+                background-image: url(../images/page_modem_image.png);
+                background-repeat: no-repeat;
+                background-position: right;
+                min-height: 370px;
+                *height: 370px; /*IE7*/ 
+            }
+
+            div.page_authentication_failure_velox_help{
+                margin-top: 225px;
+            }
+
+
+            /* @PAGE:INTERFACE-FAILURE */
+            div#page_interface_failure_content{
+                padding-top: 120px;
+            }
+
+
+            /* @PAGE:TROUBLESHOOTING */
+            div#page_troubleshooting_content{
+                padding-top: 45px;
+            }
+
+            div.page_troubleshooting_title{
+                font-family: 'TradeGothicBoldTwo';
+                font-size: 30px;
+                margin-bottom: 42px;
+            }
+
+
+            /* @PAGE:MODEM-OFF-PROBLEM */
+            div#page_modem_off_problem_content{
+                padding-top: 55px;
+            }
+
+
+            /* @PAGE:ADSL-OFF-PROBLEM */
+            div#page_adsl_off_problem_content{
+                padding-top: 10px;
+            }
+
+
+            /* @PAGE:ETHERNET-SHIELD-PROBLEM */
+            div#page_ethernet_shield_problem_content{
+                padding-top: 5px;
+            }
+
+
+            /* @PAGE:USER-PASSWORD */
+            div#page_user_password_problem_content{
+                padding-top: 5px;
+            }
+
+
+            /* @PAGE:CONNECTIONLESS */
+            div#page_connectionless_problem_content{
+                padding-top: 20px;
+            }
+
+
+            /* @PAGE:NO-NAVIGAGION */
+            div#page_no_navigation_problem_content{
+                padding-top: 0;
+            }
+
+
+            /* @PAGE:SLOW-BROWSING */
+            div#page_slow_browsing_problem_content{
+                padding-top: 90px;
+
+            }
+
+
+            /* @PAGE:CONFIGURE-WIFI */
+            div#page_configure_wifi_content{
+                padding-top: 60px;
+
+            }
+
+            div.page_form_name_configure_wifi{
+                width: 104px;
+            }
+
+            select.page_form_encryption{
+                width: 242px;
+            }
+
+
+            /* @PAGE:CONFIGURED */
+            div#page_configured_content{
+                padding-top: 150px;
+
+            }
+
+            div.page_configured_title{
+                text-align: center;
+                margin-bottom: 16px;
+            }
+
+            div.page_configured_txt{
+                text-align: center;
+            }
+
+
+            /* @PAGE:BLANK */
+            div#page_blank_content{
+                padding-top: 0;
+            }
+
+
+            /* @PAGE:REDE-FON */
+            div#page_rede_fon_content{
+                padding-top: 0;
+            }
+
+            div.page_form_rede_fon{
+                margin-top: 25px;
+            }
+
+
+            /* @PAGE:REGISTERED-RESIDENTIAL */
+            div#page_registered_residential_content{
+                padding-top: 10px;
+            }
+
+
+            /* @PAGE:REGISTERED-COMMERCIAL */
+            div#page_registered_commercial_content{
+                padding-top: 40px;
+            }
+
+
+            /* @PAGE:MODEM_INSTALLED */
+            div#page_modem_installed_content{
+                padding-top: 160px;
+            }
+
+            div.page_modem_installed_title{
+                text-align: center;
+                margin-bottom: 5px;
+            }
+
+            div.page_modem_installed_subtitle{
+                text-align: center;
+            }
+        </style>
+        <!-- MAIN -->
+        <script type="text/javascript">
+            //------------------------------------------
+// NAVIGATION
+//------------------------------------------
+            var pppCheckCnt = 0;
+            var pppStatus = 0;
+            var dslStatus = 0;
+            var securitypassWEP = "";
+            var securitypassWPA = "";
+
+            function navPage(page)
+            {
+
+                var addr = null;
+
+
+                // DEFINE PAGE  
+                switch (page)
+                {
+
+                    // PAGES
+                    case "home":
+                        navPageLink("index-2.html");
+                        break;
+
+                    case "welcome_l":
+                        navPageLink("oi_wizardf4af.html?viewPage=bem_vindo&amp;userType=house");
+                        break;
+
+                    case "welcome_r":
+                        navPageLink("oi_wizard5e5a.html?viewPage=bem_vindo&amp;userType=company");
+                        break;
+
+                    case "detecting":
+                        navPageLink("detectando.html");
+                        break;
+
+                    case "set_modem_residential":
+                        navPageLink("oi_wizard8428.html?viewPage=wanCfgView&amp;userType=house");
+                        pppCheckCnt = 0;
+                        pppStatus = 0;
+                        break;
+
+                    case "back_l":
+                        navPageLink("oi_wizardf217.html?viewPage=wanCfgView&amp;userType=house&amp;isSubmit=2");
+                        pppCheckCnt = 0;
+                        pppStatus = 0;
+                        break;
+
+                    case "set_modem_commercial":
+                        navPageLink("oi_wizard74c9.html?viewPage=wanCfgView&amp;userType=company");
+                        pppCheckCnt = 0;
+                        pppStatus = 0;
+                        break;
+
+                    case "back_r":
+                        navPageLink("oi_wizard2477.html?viewPage=wanCfgView&amp;userType=company&amp;isSubmit=2");
+                        pppCheckCnt = 0;
+                        pppStatus = 0;
+                        break;
+
+                    case "host":
+                        pppCheckCnt = 0;
+                        pppStatus = 0;
+
+                        getWizardPPPoE();
+
+                        if (pppStatus == 1)
+                        {
+                            //navPageLink( "provedor.html" );
+                            //navPageLink( "http://www.google.com" );
+                            navPageLink("http://www.urlprovedores.com.br/");
+                        } else
+                        {
+                            navPageLink("falha_autenticacao_padrao.html");
+                        }
+                        break;
+
+                    case "host2":
+                        window.location.href = "http://primeiroacesso.oi.com.br/";
+                        // navPageLink( "http://primeiroacesso.oi.com.br" );
+                        break;
+
+                    case "falha_autenticacao_padrao":
+                        window.location.href = "falha_autenticacao_padrao.html";
+                        break;
+
+                    case "authentication_failure":
+                        // navPageLink( "/wizardoi/oi_wizard.cgi?viewPage=falha_autenticacao" );
+                        navPageLink("falha_autenticacao.html");
+                        break;
+
+                    case "authentication_failure_velox":
+                        navPageLink("falha_autenticacao_velox.html");
+                        break;
+
+                    case "authentication_failure_velox_video":
+                        navPageLink("falha_autenticacao_velox_video.html");
+                        break;
+
+                    case "tryDSL":
+                        navPageLink("oi_wizard46ba.html?viewPage=verificando");
+                        break;
+
+                    case "falha_conexao_velox_video":
+                        navPageLink("oi_wizard5c61.html?viewPage=falha_conexao_velox_video");
+                        break;
+
+                    case "falha_conexao_velox_video_redirect":
+                        navPageLink("oi_wizard4915.html?viewPage=falha_conexao_velox_video&amp;isRedirect=1");
+                        break;
+
+                    case "interface_failure":
+                        navPageLink("falha_interface.html");
+                        break;
+
+                    case "troubleshooting":
+                        navPageLink("solucionando_problemas.html");
+                        break;
+
+                    case "modem_off_problem":
+                        navPageLink("problema_modem_apagado.html");
+                        break;
+
+                    case "adsl_off_problem":
+                        navPageLink("problema_adsl_apagada.html");
+                        break;
+
+                    case "ethernet_shield_problem":
+                        navPageLink("problema_placa_de_rede.html");
+                        break;
+
+                    case "user_password_problem":
+                        navPageLink("problema_usuario_senha.html");
+                        break;
+
+                    case "connectionless_problem":
+                        navPageLink("problema_sem_conexao.html");
+                        break;
+
+                    case "no_navigation_problem":
+                        navPageLink("problema_sem_navegacao.html");
+                        break;
+
+                    case "slow_browsing_problem":
+                        navPageLink("problema_navegacao_lenta.html");
+                        break;
+
+                    case "configure_wifi":
+                        navPageLink("oi_wizard9bdc.html?viewPage=wifiCfgView");
+                        break;
+
+                    case "fon_service":
+                        // navPageLink( "/wizardoi/oi_wizard.cgi?viewPage=fonCfgView" );
+                        window.top.location = "http://192.168.1.1/fon/";
+                        break;
+
+                    case "setting":
+                        navPageLink("configurando.html");
+                        break;
+
+                    case "configured":
+                        navPageLink("configurado.html");
+                        break;
+
+                    case "blank":
+                        navPageLink("em_branco.html");
+                        break;
+
+                    case "rede_fon":
+                        // navPageLink( "rede_fon.html" );
+                        window.top.location = "http://192.168.1.1/fon/";
+                        break;
+
+                    case "registered_residential":
+                        navPageLink("cadastrado_residencial.html");
+                        break;
+
+                    case "registered_commercial":
+                        navPageLink("cadastrado_comercial.html");
+                        break;
+
+                    case "modem_installed":
+                        // navPageLink( "modem_instalado.html" );
+                        navPageLink("oi_wizard083d.html?viewPage=modem_instalado");
+                        break;
+
+                    case "redireciona_portal":
+                        navPageLink_blank("redireciona_portal.html");
+                        break;
+
+
+
+                        // BTN ACTION
+                    case "close":
+                        window.parent.close();
+                        break;
+
+                    case "retry":
+                        navPageLink("oi_entry.html");
+                        break;
+
+                    case "browsing_residential":
+                        // navPageLink( "http://www.oi.com.br/boasvindas_oipravoce" );
+                        window.top.location = "http://www.oi.com.br/boasvindas_oipravoce";
+                        break;
+
+                    case "browsing_commercial":
+                        // navPageLink( "http://www.oi.com.br/boasvindas_oipranegocios" );
+                        window.top.location = "http://www.oi.com.br/boasvindas_oipranegocios";
+                        break;
+
+                    case "back":
+                        navPageLink("solucionando_problemas.html");
+                        break;
+
+                        // LINKS    
+                    case "video":
+                        //navPageLink( "http://" );
+                        navPageLink("Video/OiVeloxADSLHelp.html");
+                        break;
+
+                    case "contract":
+                        navPageLink("http://fon-instalacao.oi.com.br/contrato/contrato_de_adesao.html");
+                        break;
+
+                    case "site":
+                        navPageLink("http://www.oi.com.br/");
+                        break;
+
+                    case "configurando_WAN":
+                        navPageLink("oi_wizard7689.html?viewPage=configurandoWAN");
+                        break;
+
+                }
+            }
+
+            function navPageLink(addr)
+            {
+                // WINDOW TARGET
+                var wTarget = "_self";
+                var randomStr = 'v=' + Math.random();
+                if (addr.indexOf("http://") > -1)
+                    wTarget = "_blank";
+
+
+                //prevent cache 
+                if (addr.indexOf(".cgi?") > -1)
+                    addr += "&" + randomStr;
+                else if (addr.indexOf(".cgi") > -1)
+                    addr += "?" + randomStr;
+
+                // NAV
+                if (addr)
+                    window.open(addr, wTarget);
+            }
+
+            function navPageLink_blank(addr)
+            {
+                // WINDOW TARGET
+                var wTarget = "_blank";
+                var randomStr = 'v=' + Math.random();
+                if (addr.indexOf("http://") > -1)
+                    wTarget = "_blank";
+
+
+                //prevent cache 
+                if (addr.indexOf(".cgi?") > -1)
+                    addr += "&" + randomStr;
+                else if (addr.indexOf(".cgi") > -1)
+                    addr += "?" + randomStr;
+
+                // NAV
+                if (addr)
+                    window.open(addr, wTarget);
+
+            }
+
+            function setWizardPPPoE(postData, nextPage) {
+                $.ajax({
+                    url: "/wizardoi/oi_wizard.cgi",
+                    type: 'POST',
+                    data: postData,
+                    cache: false,
+                    success: function (returnData) {
+                        checkPPPoE(nextPage);
+                    },
+                    error: function () {
+                        alert("Configure PPPoE connection fail");
+                        navPage('authentication_failure');
+                    }
+                });
+            }
+
+            function checkPPPoE(nextPage)
+            {
+                if (pppStatus == 1)
+                {
+//      alert("PPPoE connection is up, move to WIFI page.");
+                } else if (pppStatus != 1 && pppCheckCnt < 2)
+                {
+//      alert("PPPoE connection is not up, try again("+pppCheckCnt+").");
+//      setTimeout("checkPPPoE()", 5000);
+                } else
+                {
+//      alert("PPPoE connection is not up, give up("+pppCheckCnt+").");
+                }
+                navPage(nextPage);
+            }
+
+            function getWizardPPPoE() {
+                $.ajax({
+                    url: '/wizardoi/oi_getInfo.cgi?viewPage=wzPPPoE',
+                    dataType: 'text',
+                    type: 'GET',
+                    async: false,
+                    cache: false,
+                    success: function (text) {
+                        var temp = text.split(" ");
+                        dslStatus = temp[0];
+                        pppStatus = temp[1];
+                        pppCheckCnt++;
+                    },
+                    error: function () {
+
+                    }
+                });
+            }
+
+            function getWizardPPPoENoUpdate() {
+                $.ajax({
+                    url: '/wizardoi/oi_getInfo.cgi?viewPage=wzPPPoE&noUpdate=1',
+                    dataType: 'text',
+                    type: 'GET',
+                    async: false,
+                    cache: false,
+                    success: function (text) {
+                        var temp = text.split(" ");
+                        dslStatus = temp[0];
+                        pppStatus = temp[1];
+                        pppCheckCnt++;
+                    },
+                    error: function () {
+
+                    }
+                });
+            }
+
+            /*
+             function getWizardPPPoE(){
+             $.ajax({
+             url: '/wizardoi/oi_getInfo.cgi?viewPage=wzPPPoE',
+             dataType: 'json',
+             type:'GET',
+             async: false,
+             cache: false,
+             success: function(returnData){
+             pppStatus = returnData.WIZARD.PPP.pppStatus;
+             dslStatus = returnData.WIZARD.physicalStatus;
+             pppCheckCnt++;
+             },
+             error: function() {
+             
+             }
+             });
+             } 
+             
+             function getWizardPPPoENoUpdate(){
+             $.ajax({
+             url: '/wizardoi/oi_getInfo.cgi?viewPage=wzPPPoE&noUpdate=1',
+             dataType: 'json',
+             type:'GET',
+             async: false,
+             cache: false,
+             success: function(returnData){
+             pppStatus = returnData.WIZARD.PPP.pppStatus;
+             dslStatus = returnData.WIZARD.physicalStatus;
+             pppCheckCnt++;
+             },
+             error: function() {
+             
+             }
+             });
+             } */
+
+            function getWizardWIFI() {
+                $.ajax({
+                    url: '/wizardoi/oi_getInfo.cgi?viewPage=wzWifi',
+                    dataType: 'json',
+                    type: 'GET',
+                    cache: false,
+                    success: function (returnData) {
+                        securitypassWEP = returnData.WIFI.SECURITY.passwordWEP;
+                        securitypassWPA = returnData.WIFI.SECURITY.passwordWPA;
+                    },
+                    error: function () {
+
+                    }
+                });
+            }
+
+
+        </script>
+    </head>
+    <body>
+
+
+        <!--BEGIN LAYOUT BG-->
+        <div id="layout_bg_left" class="layout">
+            <div id="layout_bg_right" class="layout">
+                &nbsp;
+            </div>
+        </div>
+        <!--END LAYOUT BG-->
+
+        <table border="0" cellpadding="0" cellspacing="0" width="100%" height="100%" class="layout_pages">
+            <tr>
+                <td height="94" valign="top" align="left">
+
+
+                    <!--BEGIN LAYOUT TOP-->
+                    <div id="layout_top">
+
+
+                        <!--BEGIN CONTENT-->
+                        <div id="layout_top_content">
+                            <img src="images/layout_top.png" width="181" height="60" title="OI VELOX" alt="OI VELOX">
+                        </div>
+                        <!--END CONTENT-->
+
+
+                    </div>
+                    <!--END LAYOUT TOP-->
+
+
+                </td>
+            </tr>
+            <tr>
+                <td valign="middle">
+
+
+                    <!--BEGIN LAYOUT PAGES CONTENT-->
+                    <div id="layout_content">
+
+                        <!--BEGIN PAGE CONTENT-->
+                        <div class="page_content">
+                            <div id="page_welcome_content">
+                                <!--BEGIN TITLE-->
+                                <div class="page_orador_oi_title">
+                                    <img src="images/page_welcome_title.png" width="57" height="34" alt="Oi" />
+                                </div>
+                                <!--END TITLE-->
+
+
+                                <!--BEGIN SUBTITLE-->
+                                <div class="page_subtitle_special">
+                                    Seja bem-vindo ao assistente de configuração do seu Oi Velox.<br />
+                                    Vamos começar? Você deve se autenticar a rede antes de navegar na internet, por favor clique em avançar.
+                                </div>
+                                <!--END SUBTITLE-->
+                            </div>
+                        </div>
+                        <!--END PAGE CONTENT-->
+
+
+                        <!--BEGIN PAGE BTNS-->
+                        <div class="page_btns">
+                            <a href="#" onclick=""><img src="images/page_btn_back.png" width="150" height="30" title="Voltar" alt="Voltar" onmouseover="this.src = 'images/page_btn_back_over.png'" onmouseout="this.src = 'images/page_btn_back.png'" /></a>
+                            <a href="#" onclick="location.href = 'autenticar.html'"><img src="images/page_btn_forward.png" width="166" height="30" title="Avan&ccedil;ar" alt="Avan&ccedil;ar" onmouseover="this.src = 'images/page_btn_forward_over.png'" onmouseout="this.src = 'images/page_btn_forward.png'" /></a>
+                        </div>
+                        <!--END PAGE BTNS-->
+
+                    </div>
+                    <!--BEGIN LAYOUT PAGES CONTENT-->
+                </td>
+            </tr>
+        </table>
+    </body>
+</html>
+
