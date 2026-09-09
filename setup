@@ -189,17 +189,16 @@ install_dep  "lighttpd"       "lighttpd"      "lighttpd"
 install_phpcgi
 
 # ─── DHCP ──────────────────────────────────────────────────
-install_dep  "dhcpd"          "dhcpd"         "isc-dhcp-server"
+install_dep  "dnsmasq"        "dnsmasq"       "dnsmasq"
 
 # ─── Ataques WPS ───────────────────────────────────────────
 install_dep  "reaver"         "reaver"        "reaver"
 install_dep  "bully"          "bully"         "bully"
 
 # ─── Flood / Deauth ────────────────────────────────────────
-install_dep  "mdk3"           "mdk3"          "mdk3"
+install_dep  "mdk4"           "mdk4"          "mdk4"
 
 # ─── Handshake / Cracking ──────────────────────────────────
-install_dep  "pyrit"          "pyrit"         "pyrit"
 install_dep  "hashcat"        "hashcat"       "hashcat"
 
 # ─── hcxtools (converte .cap → .hc22000 para hashcat) ─────
@@ -251,11 +250,10 @@ check_final "airmon-ng"      "airmon-ng"
 check_final "airodump-ng"    "airodump-ng"
 check_final "hostapd"        "hostapd"
 check_final "lighttpd"       "lighttpd"
-check_final "dhcpd"          "dhcpd"
+check_final "dnsmasq"        "dnsmasq"
 check_final "reaver"         "reaver"
 check_final "bully"          "bully"
-check_final "mdk3"           "mdk3"
-check_final "pyrit"          "pyrit"
+check_final "mdk4"           "mdk4"
 check_final "hashcat"        "hashcat"
 check_final "hcxpcapngtool"  "hcxpcapngtool"
 check_final "iwconfig"       "iwconfig"
@@ -289,8 +287,8 @@ if [ "$FALHAS" -eq 0 ]; then
 else
     echo -e "${yellow}[!] $FALHAS dependência(s) com problema. Verifique acima e instale manualmente.${transparent}"
     echo -e "${yellow}    Comando rápido:${transparent}"
-    echo -e "${white}    apt-get install aircrack-ng hostapd lighttpd isc-dhcp-server macchanger mdk3"
-    echo -e "    reaver bully php8.2-cgi nmap pyrit rfkill binutils psmisc xterm zenity"
+    echo -e "${white}    apt-get install aircrack-ng hostapd lighttpd dnsmasq macchanger mdk4"
+    echo -e "    reaver bully php8.2-cgi nmap rfkill binutils psmisc xterm zenity"
     echo -e "    curl unzip hcxtools hcxdumptool hashcat wireless-tools python3 gawk${transparent}"
 fi
 
