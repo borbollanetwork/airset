@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/airset-logo.png" alt="Airset — Router Social Engineering Toolkit" width="320">
+</p>
+
 # Airset — Router Social Engineering Toolkit
 
 Airset is a WPA/WPA2 "evil twin" toolkit: it clones a target Wi-Fi network,
