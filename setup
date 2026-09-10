@@ -65,7 +65,7 @@ function mostrarheader() {
     echo -e "${red}               ██╔══██║██║██╔══██╗╚════██║██╔══╝     ██║   "
     echo -e "${red}               ██║  ██║██║██║  ██║███████║███████╗   ██║   "
     echo -e "${red}               ╚═╝  ╚═╝╚═╝╚═╝  ╚═╝╚══════╝╚══════╝   ╚═╝   "
-    echo -e "${white}         Airset Dependencies Auto-Installer v03 | Parrot OS 7"
+    echo -e "${white}         Airset Dependencies Auto-Installer v03 | Kali / Parrot OS"
     echo -e "${green}  By Alef Carvalho [W4R10CK] [youtube.com/c/alefcarvalhobr] ${transparent}"
     echo
 }
@@ -124,19 +124,19 @@ install_phpcgi() {
     printf "%-22s" "php-cgi"
     # Testa vários nomes possíveis
     local found=""
-    for bin in php8.2-cgi php8.1-cgi php-cgi; do
+    for bin in php8.4-cgi php8.3-cgi php8.2-cgi php8.1-cgi php-cgi; do
         if command -v "$bin" &>/dev/null; then found="$bin"; break; fi
     done
 
     if [ -n "$found" ]; then
         echo -e "${green}OK! ($found)${transparent}"
     else
-        echo -e "${yellow}Instalando php8.2-cgi...${transparent}"
-        xterm $HOLD -title "Instalando php8.2-cgi" $TOPLEFTBIG \
+        echo -e "${yellow}Instalando php-cgi...${transparent}"
+        xterm $HOLD -title "Instalando php-cgi" $TOPLEFTBIG \
             -bg "#FFFFFF" -fg "#000000" \
-            -e apt-get install --yes php8.2-cgi php8.2-common
+            -e bash -c "apt-get update && apt-get install --yes php-cgi php-common"
         # fallback
-        for bin in php8.2-cgi php8.1-cgi php-cgi; do
+        for bin in php8.4-cgi php8.3-cgi php8.2-cgi php8.1-cgi php-cgi; do
             command -v "$bin" &>/dev/null && found="$bin" && break
         done
         if [ -n "$found" ]; then
@@ -155,7 +155,7 @@ conditional_clear
 mostrarheader
 setresolution
 
-echo -e "${blue}[*]${transparent} Preparando sistema (Parrot OS 7)..."
+echo -e "${blue}[*]${transparent} Preparando sistema (Kali / Parrot OS)..."
 echo
 
 # Garante que apt está funcionando e atualiza listas
@@ -270,7 +270,7 @@ check_final "fuser"          "fuser"
 # php-cgi — verificação especial
 printf "  %-22s" "php-cgi"
 PHP_FOUND=""
-for bin in php8.2-cgi php8.1-cgi php-cgi; do
+for bin in php8.4-cgi php8.3-cgi php8.2-cgi php8.1-cgi php-cgi; do
     command -v "$bin" &>/dev/null && PHP_FOUND="$bin" && break
 done
 if [ -n "$PHP_FOUND" ]; then
@@ -288,7 +288,7 @@ else
     echo -e "${yellow}[!] $FALHAS dependência(s) com problema. Verifique acima e instale manualmente.${transparent}"
     echo -e "${yellow}    Comando rápido:${transparent}"
     echo -e "${white}    apt-get install aircrack-ng hostapd lighttpd dnsmasq macchanger mdk4"
-    echo -e "    reaver bully php8.2-cgi nmap rfkill binutils psmisc xterm zenity"
+    echo -e "    reaver bully php-cgi nmap rfkill binutils psmisc xterm zenity"
     echo -e "    curl unzip hcxtools hcxdumptool hashcat wireless-tools python3 gawk${transparent}"
 fi
 

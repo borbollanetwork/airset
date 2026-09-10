@@ -42,9 +42,9 @@ version=0.24
 IP=192.168.1.1
 RANG_IP=$(echo $IP | cut -d "." -f 1,2,3)
 
-# Detectar binário PHP-CGI (Parrot OS 7 usa php8.2-cgi ou php-cgi)
+# Detectar binário PHP-CGI (Kali usa php8.4-cgi; Parrot OS 7 usa php8.2-cgi; meta php-cgi)
 PHP_CGI=""
-for bin in php8.2-cgi php8.1-cgi php-cgi; do
+for bin in php8.4-cgi php8.3-cgi php8.2-cgi php8.1-cgi php-cgi; do
     if command -v "$bin" &>/dev/null; then
         PHP_CGI=$(command -v "$bin")
         break
@@ -289,7 +289,7 @@ function checkdependences() {
     if [ "$missing" = "1" ]; then
         echo
         echo -e "${red}Instale as dependências faltantes e tente novamente.${transparent}"
-        echo -e "${yellow}Dica (Parrot OS 7):${transparent} apt install aircrack-ng hostapd lighttpd dnsmasq macchanger mdk4 reaver bully php8.2-cgi nmap rfkill binutils psmisc xterm zenity curl unzip hcxtools hashcat"
+        echo -e "${yellow}Dica (Parrot OS 7):${transparent} apt install aircrack-ng hostapd lighttpd dnsmasq macchanger mdk4 reaver bully php-cgi nmap rfkill binutils psmisc xterm zenity curl unzip hcxtools hashcat"
         exit 1
     fi
 

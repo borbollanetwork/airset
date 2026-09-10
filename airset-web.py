@@ -522,6 +522,15 @@ a{color:var(--cyan)}
 .hero{border:1px solid var(--border);background:linear-gradient(135deg,rgba(11,16,32,.96),rgba(20,10,14,.9));border-radius:16px;padding:18px 22px;display:flex;justify-content:space-between;align-items:center;gap:16px;flex-wrap:wrap}
 .title{margin:0;color:var(--red);font-size:clamp(22px,4vw,34px);letter-spacing:.14em;text-transform:uppercase;text-shadow:0 0 16px rgba(255,59,92,.4)}
 .sub{margin:6px 0 0;color:var(--muted);font-size:13px}
+.brand{display:flex;align-items:center;gap:16px}
+.logo{width:56px;height:56px;flex:none;filter:drop-shadow(0 0 8px rgba(255,59,92,.55))}
+.logo .arc,.logo .dot{fill:none;stroke:var(--red);stroke-width:6;stroke-linecap:round}
+.logo .dot{fill:var(--red);stroke:none}
+.logo .a1{animation:wifi 1.8s ease-in-out infinite}
+.logo .a2{animation:wifi 1.8s ease-in-out .22s infinite}
+.logo .a3{animation:wifi 1.8s ease-in-out .44s infinite}
+@keyframes wifi{0%,55%,100%{opacity:.2}28%{opacity:1}}
+@media(prefers-reduced-motion:reduce){.logo .a1,.logo .a2,.logo .a3{animation:none;opacity:1}}
 .warn{border:1px solid rgba(255,209,102,.4);background:rgba(255,209,102,.06);color:var(--yellow);border-radius:12px;padding:9px 13px;margin:16px 0;font-size:12px}
 .grid{display:grid;grid-template-columns:1.2fr 1fr;gap:16px;margin-top:16px}
 @media(max-width:820px){.grid{grid-template-columns:1fr}}
@@ -549,9 +558,15 @@ tr.sel{background:rgba(0,255,136,.08)}tr:hover{background:rgba(255,255,255,.03);
 .dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--muted);margin-right:6px}
 .dot.on{background:var(--green);box-shadow:0 0 8px var(--green)}
 </style></head><body><div class="wrap">
-<section class="hero"><div>
-<h1 class="title">▚ Airset Web</h1>
-<p class="sub">Router Social Engineering Toolkit — painel de controle local</p></div>
+<section class="hero"><div class="brand">
+<svg class="logo" viewBox="0 0 64 64" role="img" aria-label="WiFi">
+<path class="arc a1" d="M22 42a14 14 0 0 1 20 0"/>
+<path class="arc a2" d="M14 34a26 26 0 0 1 36 0"/>
+<path class="arc a3" d="M6 26a38 38 0 0 1 52 0"/>
+<circle class="dot" cx="32" cy="50" r="4"/>
+</svg>
+<div><h1 class="title">Airset Web</h1>
+<p class="sub">Router Social Engineering Toolkit — painel de controle local</p></div></div>
 <div><span id="conn"><span class="dot"></span>fase: <b id="phase">idle</b></span>
 <button class="btn r" onclick="act('cleanup')">Cleanup total</button></div></section>
 
