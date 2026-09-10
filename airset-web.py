@@ -69,12 +69,52 @@ PROCS = {}  # name -> Popen for long-running background jobs
 _VALIDATOR = {"stop": False, "thread": None}
 
 
+# ── terminal colors (stdout only; web log stays plain text) ─────────────────
+_USE_COLOR = sys.stdout.isatty() and os.environ.get("NO_COLOR") is None
+_ANSI = {"red": "1;31", "grn": "1;32", "yel": "1;33", "blu": "1;34",
+         "cyn": "1;36", "wht": "1;37", "gry": "0;90", "dim": "2",
+         "bgrn": "1;92", "bcyn": "1;96"}
+
+
+def _c(name, s):
+    return f"\033[{_ANSI[name]}m{s}\033[0m" if _USE_COLOR else s
+
+
+def _colorize(line):
+    """Add ANSI color to a stdout log line based on its prefix/keywords."""
+    if not _USE_COLOR:
+        return line
+    ts, _, msg = line.partition("  ")
+    ts = _c("gry", ts)
+    if msg.startswith("[+]"):
+        body = "[" + _c("grn", "+") + "] " + _c("grn", msg[4:])
+    elif msg.startswith("[-]"):
+        body = "[" + _c("red", "-") + "] " + _c("wht", msg[4:])
+    elif msg.startswith("[!]"):
+        body = "[" + _c("yel", "!") + "] " + _c("yel", msg[4:])
+    elif msg.startswith("!"):
+        body = _c("red", msg)
+    elif msg.startswith("+"):
+        head, sep, rest = msg.partition(":")
+        body = _c("cyn", head) + (sep + _c("dim", rest) if sep else "")
+    elif "SENHA CAPTURADA" in msg:
+        body = _c("bgrn", msg)
+    else:
+        kw = {"monitor": "grn", "handshake capturado": "grn", "senha salva": "grn",
+              "scan concluído": "cyn", "clientes de": "cyn", "AP falso": "cyn",
+              "restaurada": "grn", "encerrad": "yel", "sem handshake": "yel",
+              "indisponível": "yel"}
+        color = next((v for k, v in kw.items() if k in msg), None)
+        body = _c(color, msg) if color else msg
+    return f"{ts}  {body}"
+
+
 def log(msg):
     line = f"{datetime.now():%H:%M:%S}  {msg}"
     with _LOCK:
         STATE["log"].append(line)
         del STATE["log"][:-200]
-    print(line, flush=True)
+    print(_colorize(line), flush=True)
 
 
 def run(cmd, timeout=None, check=False):
@@ -884,6 +924,19 @@ class Handler(BaseHTTPRequestHandler):
         return self._send(200, {"ok": True})
 
 
+def _banner(url):
+    art = r"""
+     )))       _    ___ ___ ___ ___ _____
+    )))))     /_\  |_ _| _ \ __| __|_   _|
+   ((((( o    / _ \  | ||   / _|| _|  | |
+    (((((    /_/ \_\|___|_|_\___|___| |_|
+      '""".rstrip("\n")
+    print(_c("red", art))
+    print("        " + _c("gry", "Router Social Engineering Toolkit"))
+    print("  " + _c("wht", "Painel") + "  " + _c("cyn", url))
+    print("  " + _c("yel", "⚠  Uso autorizado apenas. Ctrl+C encerra e limpa.\n"))
+
+
 def main():
     ap = argparse.ArgumentParser(description="Airset web control panel (stdlib).")
     ap.add_argument("--host", default="127.0.0.1")
@@ -897,7 +950,7 @@ def main():
     DUMP_PATH.mkdir(parents=True, exist_ok=True)
 
     def shutdown(*_):
-        print("\n[!] Encerrando — limpando...")
+        print("\n[" + _c("yel", "!") + "] " + _c("yel", "Encerrando — limpando..."))
         full_cleanup()
         sys.exit(0)
 
@@ -908,8 +961,7 @@ def main():
         pass
 
     srv = ThreadingHTTPServer((args.host, args.port), Handler)
-    print(f"Airset Web  ->  http://{args.host}:{args.port}")
-    print("Uso autorizado apenas. Ctrl+C encerra e limpa.")
+    _banner(f"http://{args.host}:{args.port}")
     try:
         srv.serve_forever()
     except KeyboardInterrupt:
