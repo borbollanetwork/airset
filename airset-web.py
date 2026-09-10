@@ -514,6 +514,7 @@ def bg(fn, *a):
 
 PAGE = r"""<!doctype html><html lang="pt-BR"><head><meta charset="utf-8">
 <title>Airset Web</title><meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20viewBox%3D%220%200%2064%2064%22%3E%3Cg%20fill%3D%22none%22%20stroke%3D%22%23ff3b5c%22%20stroke-width%3D%226%22%20stroke-linecap%3D%22round%22%3E%3Cpath%20d%3D%22M22%2042a14%2014%200%200%201%2020%200%22/%3E%3Cpath%20d%3D%22M14%2034a26%2026%200%200%201%2036%200%22/%3E%3Cpath%20d%3D%22M6%2026a38%2038%200%200%201%2052%200%22/%3E%3C/g%3E%3Ccircle%20cx%3D%2232%22%20cy%3D%2250%22%20r%3D%224%22%20fill%3D%22%23ff3b5c%22/%3E%3C/svg%3E">
 <style>
 :root{--bg:#05070c;--panel:#0b1020;--border:#7f1d2e;--red:#ff3b5c;--green:#00ff88;--cyan:#00e5ff;--yellow:#ffd166;--text:#e5e7eb;--muted:#8b949e}
 *{box-sizing:border-box}body{margin:0;min-height:100vh;background:radial-gradient(circle at top left,rgba(255,59,92,.12),transparent 34%),radial-gradient(circle at bottom right,rgba(0,229,255,.12),transparent 32%),var(--bg);color:var(--text);font-family:ui-monospace,Menlo,Consolas,monospace}
