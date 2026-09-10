@@ -704,7 +704,8 @@ tr.sel{background:rgba(0,255,136,.08)}tr:hover{background:rgba(255,255,255,.03);
     <div class="card" style="margin-top:14px">
       <h2>2 · Scan de redes</h2>
       <div class="row">
-        <div><label>Duração (s)</label><input id="scanSecs" type="number" value="12" min="4" max="60"></div>
+        <div style="flex:0 0 120px"><label>Duração (s)</label><input id="scanSecs" type="number" value="12" min="4" max="60"></div>
+        <div><label>Filtrar por nome (SSID)</label><input id="filter" placeholder="ex: CLARO" oninput="applyFilter(this.value)"></div>
         <div style="flex:0 0 auto"><button class="btn" onclick="scan()">Escanear</button></div>
       </div>
       <div style="max-height:220px;overflow:auto;margin-top:10px">
@@ -762,7 +763,12 @@ tr.sel{background:rgba(0,255,136,.08)}tr:hover{background:rgba(255,255,255,.03);
   </div>
 </div>
 </div><script>
-const TOK="__CSRF__"; let SEL=null;
+const TOK="__CSRF__"; let SEL=null,FILTER="",LAST=null;
+function applyFilter(v){FILTER=(v||"").toLowerCase();if(LAST)renderTargets(LAST.targets)}
+function renderTargets(list){const tb=document.getElementById("targets");tb.innerHTML="";
+  list.filter(t=>t.essid.toLowerCase().includes(FILTER)).forEach(t=>{const tr=document.createElement("tr");if(SEL===t.bssid)tr.className="sel";
+    tr.innerHTML=`<td>${t.essid}</td><td>${t.bssid}</td><td>${t.channel}</td><td>${t.power}</td><td>${t.enc}</td>`;
+    tr.onclick=()=>{SEL=t.bssid;api("/api/target","POST",{bssid:t.bssid});load()};tb.appendChild(tr)})}
 async function api(p,m,b){const o={headers:{}};if(m&&m!=="GET"){o.method=m;o.headers["X-Airset-Token"]=TOK;o.headers["Content-Type"]="application/json";if(b)o.body=JSON.stringify(b)}const r=await fetch(p,o);return r.json()}
 async function act(a,b){await api("/api/"+a,"POST",b);load()}
 function startMon(){act("monitor",{iface:document.getElementById("iface").value})}
@@ -778,10 +784,7 @@ async function load(){const s=await api("/api/state");
  opt(document.getElementById("apIface"),s.interfaces,true);
  opt(document.getElementById("tpl"),s.templates,true);
  document.getElementById("monInfo").textContent=s.monitor?("monitor: "+s.monitor):"";
- const tb=document.getElementById("targets");tb.innerHTML="";
- s.targets.forEach(t=>{const tr=document.createElement("tr");if(SEL===t.bssid)tr.className="sel";
-   tr.innerHTML=`<td>${t.essid}</td><td>${t.bssid}</td><td>${t.channel}</td><td>${t.power}</td><td>${t.enc}</td>`;
-   tr.onclick=()=>{SEL=t.bssid;api("/api/target","POST",{bssid:t.bssid});load()};tb.appendChild(tr)});
+ LAST=s;renderTargets(s.targets);
  if(s.target){SEL=s.target.bssid;document.getElementById("tgtBox").innerHTML=`Alvo: <b style="color:var(--cyan)">${s.target.essid}</b> · ${s.target.bssid} · ch ${s.target.channel}`}
  const ct=document.getElementById("clientsTbl");ct.innerHTML="";
  (s.target_clients||[]).forEach(c=>{const tr=document.createElement("tr");tr.innerHTML=`<td>${c.mac}</td><td>${c.power}</td><td>${c.packets}</td>`;ct.appendChild(tr)});
