@@ -45,6 +45,25 @@ for the victim to submit the password. Captured passwords are saved to
 
 Captive-portal templates live in `web_interfaces/` (`neutra`, `velox`, `virtua`).
 
+## Web control panel (new)
+
+Prefer a browser over the `xterm` menus? `airset-web.py` is a stdlib-only web panel
+that drives the whole flow — no Flask, no pip:
+
+```bash
+sudo python3 airset-web.py            # -> http://127.0.0.1:8092
+```
+
+Steps map to cards in the UI: pick the adapter and enable **monitor mode**, **scan**
+networks, click a **target**, **capture the handshake** (airodump + deauth), then raise
+the **fake AP + captive portal** with a chosen template. A live panel shows connected
+clients, password attempts, and the captured Wi-Fi password (validated against the
+handshake with aircrack-ng). The theme matches the CLI banner (hacker dark).
+
+It binds to `127.0.0.1` and requires an `X-Airset-Token` header issued to the page, so
+a random localhost tab cannot drive your radio. `Ctrl+C` (or **Cleanup total**) tears
+everything down and restarts NetworkManager. Needs root, like the CLI.
+
 ## 2026 modernization
 
 This fork updates the toolkit to run on current Parrot/Kali, where several Kali
