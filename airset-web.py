@@ -632,7 +632,7 @@ PAGE = r"""<!doctype html><html lang="pt-BR"><head><meta charset="utf-8">
 :root{--bg:#05070c;--panel:#0b1020;--border:#7f1d2e;--red:#ff3b5c;--green:#00ff88;--cyan:#00e5ff;--yellow:#ffd166;--text:#e5e7eb;--muted:#8b949e}
 *{box-sizing:border-box}body{margin:0;min-height:100vh;background:radial-gradient(circle at top left,rgba(255,59,92,.12),transparent 34%),radial-gradient(circle at bottom right,rgba(0,229,255,.12),transparent 32%),var(--bg);color:var(--text);font-family:ui-monospace,Menlo,Consolas,monospace}
 a{color:var(--cyan)}
-.wrap{width:min(1200px,calc(100% - 28px));margin:0 auto;padding:22px 0 40px}
+.wrap{width:calc(100% - 32px);margin:0 auto;padding:22px 0 40px}
 .hero{border:1px solid var(--border);background:linear-gradient(135deg,rgba(11,16,32,.96),rgba(20,10,14,.9));border-radius:16px;padding:18px 22px;display:flex;justify-content:space-between;align-items:center;gap:16px;flex-wrap:wrap}
 .title{margin:0;color:var(--red);font-size:clamp(22px,4vw,34px);letter-spacing:.14em;text-transform:uppercase;text-shadow:0 0 16px rgba(255,59,92,.4)}
 .sub{margin:6px 0 0;color:var(--muted);font-size:13px}
