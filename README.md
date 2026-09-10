@@ -18,6 +18,12 @@ Modifications are allowed as long as credit to the original author is kept.
 > clients, or phishing credentials on networks you do not control is illegal in most
 > countries. You are solely responsible for how you use it.
 
+## Screenshots
+
+| Web control panel | CLI |
+|---|---|
+| ![Airset web control panel](assets/screenshot-web.png) | ![Airset CLI](assets/screenshot-cli.png) |
+
 ## Requirements
 
 - **Parrot OS 7** (Debian Bookworm) or equivalent, running as **root**
